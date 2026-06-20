@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "PatchWork",
+    "slug": "frontend",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow PatchWork to access your camera to capture photos.",
+          "microphonePermission": "Allow PatchWork to access your microphone (not used).",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow PatchWork to use your location to tag photos with GPS coordinates.",
+          "locationAlwaysPermission": "Allow PatchWork to use your location to tag photos with GPS coordinates.",
+          "locationWhenInUsePermission": "Allow PatchWork to use your location to tag photos with GPS coordinates."
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.patchwork.frontend"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.patchwork.frontend",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
