@@ -2,13 +2,50 @@ import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { useState, useEffect, useRef } from 'react';
 import { Button, StyleSheet, Text, View, Alert } from 'react-native';
-import { calculateImageHash } from '../utils/imageHash';
+
+const API_BASE = 'http://localhost:3000';
 
 interface CaptureResult {
   imageUri: string;
-  imageHash: string;
   latitude: number | null;
   longitude: number | null;
+  uploadUrl: string | null;
+}
+
+async function requestPresignedUrl(): Promise<{
+  presigned_url: string;
+  object_key: string;
+  upload_id: string;
+}> {
+  const response = await fetch(`${API_BASE}/api/ports/request-upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Failed to get presigned URL: ${response.status} ${body}`);
+  }
+
+  return response.json();
+}
+
+async function uploadImageToS3(presignedUrl: string, imageUri: string): Promise<void> {
+  const response = await fetch(imageUri);
+  const blob = await response.blob();
+
+  const uploadResponse = await fetch(presignedUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'image/jpeg',
+    },
+    body: blob,
+  });
+
+  if (!uploadResponse.ok) {
+    const body = await uploadResponse.text();
+    throw new Error(`S3 upload failed: ${uploadResponse.status} ${body}`);
+  }
 }
 
 export default function CaptureScreen() {
@@ -65,18 +102,19 @@ export default function CaptureScreen() {
         }
       }
 
-      const imageHash = await calculateImageHash(photo.uri);
+      const { presigned_url } = await requestPresignedUrl();
+      await uploadImageToS3(presigned_url, photo.uri);
 
       const result: CaptureResult = {
         imageUri: photo.uri,
-        imageHash,
         latitude,
         longitude,
+        uploadUrl: presigned_url,
       };
 
       Alert.alert(
         'Capture Successful',
-        `Hash: ${imageHash.substring(0, 16)}...\nLocation: ${latitude ? `${latitude.toFixed(6)}, ${longitude?.toFixed(6)}` : 'Not available'}`
+        `Uploaded!\nLocation: ${latitude ? `${latitude.toFixed(6)}, ${longitude?.toFixed(6)}` : 'Not available'}`
       );
 
       console.log('Capture result:', result);

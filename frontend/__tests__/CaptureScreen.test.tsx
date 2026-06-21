@@ -4,7 +4,6 @@ import { Alert } from 'react-native';
 import CaptureScreen from '../src/components/CaptureScreen';
 import * as Camera from 'expo-camera';
 import * as Location from 'expo-location';
-import { calculateImageHash } from '../src/utils/imageHash';
 
 jest.mock('expo-camera', () => {
   const React = require('react');
@@ -17,11 +16,9 @@ jest.mock('expo-camera', () => {
   };
 });
 jest.mock('expo-location');
-jest.mock('../src/utils/imageHash');
 
 describe('CaptureScreen', () => {
   const mockRequestCameraPermission = jest.fn();
-  const mockRequestLocationPermission = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
