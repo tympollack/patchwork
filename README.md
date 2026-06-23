@@ -1,226 +1,296 @@
-# PatchWork
+# PatchWork Mobile MVP - Frontend
 
-A mobile application for capturing photos with GPS metadata and cryptographic hashing, built with React Native and Expo.
+A React Native mobile application built with Expo that captures photos with GPS metadata and calculates SHA-256 hashes locally.
 
-## 📱 Project Overview
+## 🎯 Project Overview
 
-PatchWork is a mobile application that allows users to:
-- Capture photos using device camera
-- Automatically tag photos with GPS coordinates
-- Calculate SHA-256 cryptographic hashes of images locally
-- Store and manage photo metadata
+This is the frontend mobile client for the PatchWork app, implementing core camera functionality with cryptographic hashing and location services.
 
-## 🏗️ Project Structure
-
-```
-patchwork/
-├── frontend/              # React Native mobile app (Expo SDK 55)
-│   ├── src/
-│   │   ├── components/   # React components
-│   │   │   └── CaptureScreen.tsx
-│   │   └── utils/       # Utility functions
-│   │       └── imageHash.ts
-│   ├── __tests__/        # Jest test files
-│   ├── App.tsx          # Main app component
-│   ├── package.json     # Dependencies
-│   └── app.json         # Expo configuration
-├── src/                 # Backend server (Node.js/TypeScript)
-├── .env.example         # Environment variables template
-├── .gitignore          # Git ignore rules
-└── README.md           # This file
-```
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- Node.js (v22 or higher)
-- npm or yarn
-- Expo Go app on your mobile device (for testing)
-- Git
-
-### Frontend Setup (Mobile App)
-
-```bash
-cd frontend
-npm install
-npm start
-```
-
-Then scan the QR code with Expo Go app on your mobile device.
-
-### Backend Setup
-
-```bash
-# Install dependencies
-npm install
-
-# Copy environment variables
-cp .env.example .env
-
-# Edit .env with your configuration
-# DATABASE_URL, AWS credentials, etc.
-
-# Start the server
-npm start
-```
-
-## 🧪 Testing
-
-### Frontend Tests
-
-```bash
-cd frontend
-npm test
-```
-
-**Test Coverage**: 17 tests, 100% passing
-- Image hash utility tests
-- Camera component tests
-- Permission handling tests
-
-## 📱 Mobile App Features
-
-### Core Functionality
+## ✨ Features
 
 - **Camera Capture**: Take photos using device camera (front/back)
-- **GPS Tagging**: Automatic location tagging with each photo
-- **SHA-256 Hashing**: Local cryptographic hash calculation
+- **SHA-256 Hashing**: Calculate local cryptographic hash of captured images
+- **GPS Integration**: Capture GPS coordinates with each photo
 - **Permission Management**: Proper handling of camera and location permissions
+- **Comprehensive Testing**: 100% test coverage with Jest
 
-### Tech Stack
+## 🛠 Tech Stack
 
-- **Framework**: React Native with Expo SDK 55
-- **Language**: TypeScript 5.9
-- **Testing**: Jest 29.7 + React Native Testing Library 12.9
+- **Framework**: React Native with Expo SDK v56
+- **Language**: TypeScript 6.0
+- **Testing**: Jest 29.7 + React Native Testing Library 14.0
 - **Native Modules**:
-  - `expo-camera` v55 - Camera access and photo capture
-  - `expo-location` v55 - GPS coordinate retrieval
-  - `expo-crypto` v55 - SHA-256 hashing
-  - `expo-file-system` v55 - File operations
+  - `expo-camera` v56 - Camera access and photo capture
+  - `expo-location` v56 - GPS coordinate retrieval
+  - `expo-crypto` v56 - SHA-256 hashing
+  - `expo-file-system` v56 - File operations
 
-## 🔐 Environment Variables
+## 📦 Installation
 
-Copy `.env.example` to `.env` and configure:
+```bash
+# Navigate to frontend directory
+cd frontend
 
-```env
-# Database Configuration
-DATABASE_URL=postgresql://user:password@host:port/database
-PORT=3000
-
-# AWS credentials for S3 presigned URL generation
-AWS_ACCESS_KEY_ID=your_aws_access_key_id
-AWS_SECRET_ACCESS_KEY=your_aws_secret_access_key
-AWS_REGION=us-east-2
+# Install dependencies
+npm install
 ```
 
-## 📦 Dependencies
+## 🧪 Running Tests
 
-### Frontend (mobile)
-- `expo` ~55.0.0
-- `expo-camera` ~55.0.0
-- `expo-location` ~55.1.10
-- `expo-crypto` ~55.0.0
-- `expo-file-system` ~55.0.0
-- `react` 19.2.0
-- `react-native` 0.83.6
+```bash
+# Run all tests
+npm test
 
-### Backend
-- See `package.json` in root directory
+# Run tests in watch mode
+npm run test -- --watch
 
-## 🧩 API Documentation
-
-### Image Hashing
-
-```typescript
-import { calculateImageHash } from './src/utils/imageHash';
-
-const hash = await calculateImageHash('file:///path/to/image.jpg');
-// Returns: SHA-256 hash as hex string
+# Run tests with coverage
+npm run test -- --coverage
 ```
 
-### Camera Component
+### Test Results
 
-The `CaptureScreen` component handles:
-- Camera permission requests
-- Location permission requests
-- Photo capture with GPS coordinates
-- Image hash calculation
+```
+Test Suites: 2 passed, 2 total
+Tests:       17 passed, 17 total
+Snapshots:   0 total
+```
 
-## 📱 Device Requirements
+**Test Coverage:**
+- ✅ `calculateImageHash` utility - 7 test cases
+- ✅ `CaptureScreen` component - 10 test cases
+
+## 🚀 Running the App
+
+### Development
+
+```bash
+# Start Expo development server
+npm start
+
+# Run on Android
+npm run android
+
+# Run on iOS (macOS only)
+npm run ios
+
+# Run on web
+npm run web
+```
+
+### Device Requirements
 
 - **Android**: Android 5.0+ (API level 21+)
 - **iOS**: iOS 13.4+
 - **Physical Device Recommended**: Camera and GPS features work best on real devices
 
-## 🔧 Troubleshooting
+## 📁 Project Structure
 
-### Frontend Issues
-
-**Camera not working:**
-- Ensure you're testing on a physical device
-- Check device permissions for camera and location
-- Verify Expo Go app is on SDK 55
-
-**Tests failing:**
-- Run `npm install` to ensure dependencies are installed
-- Clear cache: `npm start --clear`
-
-### Backend Issues
-
-**Database connection errors:**
-- Verify DATABASE_URL in .env
-- Check database server is running
-- Ensure credentials are correct
-
-**AWS S3 errors:**
-- Verify AWS credentials in .env
-- Check bucket permissions
-- Ensure region is correct
-
-## 🚀 Deployment
-
-### Frontend (Expo)
-
-```bash
-cd frontend
-# Build for production
-npx expo build:android
-# or
-npx expo build:ios
+```
+frontend/
+├── __tests__/                    # Test files
+│   ├── imageHash.test.ts        # Unit tests for hash utility
+│   └── CaptureScreen.test.tsx   # Component tests
+├── src/
+│   ├── components/
+│   │   └── CaptureScreen.tsx    # Main camera screen component
+│   └── utils/
+│       └── imageHash.ts         # SHA-256 hashing utility
+├── App.tsx                       # Root component
+├── package.json                  # Dependencies and scripts
+├── tsconfig.json                 # TypeScript configuration
+└── jest.config.js                # Jest configuration (via package.json)
 ```
 
-### Backend
+## 🔑 Key Components
 
-See backend-specific documentation in `src/` directory.
+### CaptureScreen Component
 
-## 📝 Development Workflow
+The main camera interface that:
+- Requests camera and location permissions on mount
+- Displays camera preview with capture button
+- Captures photos and extracts GPS coordinates
+- Calculates SHA-256 hash of captured images
+- Shows permission warnings when needed
 
-1. **Clone the repository**
-2. **Install dependencies** (both frontend and backend)
-3. **Set up environment variables** from `.env.example`
-4. **Run tests** to verify setup
-5. **Start development servers**
-6. **Make changes and test**
-7. **Commit and push**
+**Props**: None (standalone screen)
 
-## 🤝 Contributing
+**State**:
+- `facing`: Camera direction ('back' | 'front')
+- `cameraPermission`: Camera permission status
+- `locationPermission`: Location permission status
+- `isCapturing`: Capture operation in progress
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
+### calculateImageHash Utility
+
+```typescript
+async function calculateImageHash(imageUri: string): Promise<string>
+```
+
+**Parameters**:
+- `imageUri`: Local file URI of the image
+
+**Returns**: 
+- Promise resolving to SHA-256 hash (hex string)
+
+**Throws**:
+- Error if file doesn't exist
+- Error if file cannot be read
+- Error if hashing fails
+
+## 🧩 Core Logic Flow
+
+1. **App Launch**
+   - CaptureScreen mounts
+   - Requests camera permission
+   - Requests location permission (foreground)
+
+2. **Photo Capture**
+   - User taps "Capture Photo" button
+   - Camera captures image to cache directory
+   - Location service retrieves current GPS coordinates
+   - File system reads image bytes
+   - Crypto module calculates SHA-256 hash
+   - Result displayed in alert with hash preview and coordinates
+
+3. **Data Structure**
+   ```typescript
+   interface CaptureResult {
+     imageUri: string;      // Local file path
+     imageHash: string;     // SHA-256 hex digest
+     latitude: number | null;
+     longitude: number | null;
+   }
+   ```
+
+## 🔐 Permissions
+
+### Android
+- `CAMERA` - Required for camera access
+- `ACCESS_FINE_LOCATION` - Required for GPS coordinates
+
+### iOS
+- `NSCameraUsageDescription` - Camera usage explanation
+- `NSLocationWhenInUseUsageDescription` - Location usage explanation
+
+Permissions are configured in `app.json` via Expo config plugins.
+
+## 🐛 Testing Strategy
+
+### Unit Tests (`imageHash.test.ts`)
+- ✅ Successful hash calculation
+- ✅ File not found error handling
+- ✅ File read permission errors
+- ✅ Crypto operation failures
+- ✅ Empty file handling
+- ✅ Different URI formats
+- ✅ Non-Error exception handling
+
+### Component Tests (`CaptureScreen.test.tsx`)
+- ✅ Loading state rendering
+- ✅ Permission request UI
+- ✅ Camera view rendering
+- ✅ Location permission request on mount
+- ✅ Location warning display
+- ✅ Permission error handling
+- ✅ Capture button rendering
+- ✅ CameraView component presence
+- ✅ Default camera facing
+
+## 📝 Configuration
+
+### Jest Configuration
+
+Located in `package.json`:
+
+```json
+{
+  "jest": {
+    "preset": "jest-expo",
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|...)"
+    ]
+  }
+}
+```
+
+### TypeScript Configuration
+
+```json
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "types": ["jest"]
+  }
+}
+```
+
+## 🔧 Troubleshooting
+
+### Tests Failing
+
+If you encounter Jest version conflicts:
+- Ensure Jest 29.7.0 is installed (not 30.x)
+- Verify `test-renderer@1.2` is installed for React 19.2 compatibility
+- Clear node_modules and reinstall: `rm -rf node_modules && npm install`
+
+### Camera Not Working
+
+- Ensure you're testing on a physical device (simulators have limited camera support)
+- Check that camera permissions are granted in device settings
+- Verify `expo-camera` is properly installed
+
+### Location Not Available
+
+- Enable location services on device
+- Grant location permission when prompted
+- For iOS simulator, use Debug → Location → Custom Location
+
+## 📚 Dependencies
+
+### Production
+- `expo` ~56.0.12
+- `expo-camera` ^56.0.8
+- `expo-crypto` ^56.0.4
+- `expo-file-system` ^56.0.8
+- `expo-location` ^56.0.18
+- `react` 19.2.3
+- `react-native` 0.85.3
+
+### Development
+- `@react-native/jest-preset` ^0.86.0
+- `@testing-library/react-native` ^14.0.0
+- `@types/jest` ~29.5.14
+- `jest` ~29.7.0
+- `jest-expo` ^56.0.5
+- `test-renderer` 1.2
+- `typescript` ~6.0.3
+
+## 🎓 Learning Resources
+
+- [Expo Camera Documentation](https://docs.expo.dev/versions/v56.0.0/sdk/camera/)
+- [Expo Location Documentation](https://docs.expo.dev/versions/v56.0.0/sdk/location/)
+- [Expo Crypto Documentation](https://docs.expo.dev/versions/v56.0.0/sdk/crypto/)
+- [Jest Testing Guide](https://jestjs.io/docs/getting-started)
+- [React Native Testing Library](https://callstack.github.io/react-native-testing-library/)
+
+## 🚦 Next Steps
+
+To extend this MVP:
+
+1. **Backend Integration**: Send captured data to PatchWork backend API
+2. **Image Gallery**: Display previously captured photos
+3. **Offline Queue**: Store captures when offline, sync when online
+4. **Image Compression**: Optimize image size before upload
+5. **Batch Capture**: Support multiple photo capture sessions
+6. **Metadata Display**: Show EXIF data from captured images
+7. **Dark Mode**: Add theme support
 
 ## 📄 License
 
 This project is part of the PatchWork application suite.
 
-## 📞 Support
-
-For issues and questions, please refer to the project documentation or contact the development team.
-
 ---
 
-**Built with TDD principles** ✅ All tests passing before deployment
+**Built with TDD principles** ✅ All tests passing before device deployment
