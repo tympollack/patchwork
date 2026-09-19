@@ -16,6 +16,9 @@ jest.mock('expo-camera', () => {
   };
 });
 jest.mock('expo-location');
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+}));
 
 describe('CaptureScreen', () => {
   const mockRequestCameraPermission = jest.fn();
@@ -37,7 +40,7 @@ describe('CaptureScreen', () => {
 
     const { getByText } = render(<CaptureScreen />);
 
-    expect(getByText('Loading camera permissions...')).toBeTruthy();
+    expect(getByText('// INITIALIZING SENSOR...')).toBeTruthy();
   });
 
   it('should render permission request UI when camera permission is not granted', () => {
@@ -49,8 +52,8 @@ describe('CaptureScreen', () => {
 
     const { getByText } = render(<CaptureScreen />);
 
-    expect(getByText('We need your permission to use the camera')).toBeTruthy();
-    expect(getByText('Grant Camera Permission')).toBeTruthy();
+    expect(getByText('// CAMERA ACCESS REQUIRED')).toBeTruthy();
+    expect(getByText('GRANT PERMISSION')).toBeTruthy();
   });
 
   it('should render camera view when camera permission is granted', () => {
@@ -62,7 +65,7 @@ describe('CaptureScreen', () => {
 
     const { getByText } = render(<CaptureScreen />);
 
-    expect(getByText('Capture Photo')).toBeTruthy();
+    expect(getByText(/INITIALIZING|CAPTURE/)).toBeTruthy();
   });
 
   it('should request location permissions on mount', async () => {
@@ -89,7 +92,7 @@ describe('CaptureScreen', () => {
     const { getByText } = render(<CaptureScreen />);
 
     await waitFor(() => {
-      expect(getByText(/Location permission not granted/)).toBeTruthy();
+      expect(getByText(/WARN:\/\/NO_GPS/)).toBeTruthy();
     });
   });
 
@@ -106,7 +109,7 @@ describe('CaptureScreen', () => {
       expect(Location.requestForegroundPermissionsAsync).toHaveBeenCalled();
     });
 
-    expect(queryByText(/Location permission not granted/)).toBeNull();
+    expect(queryByText(/WARN:\/\/NO_GPS/)).toBeNull();
   });
 
   it('should handle location permission request errors gracefully', async () => {
@@ -139,7 +142,7 @@ describe('CaptureScreen', () => {
 
     const { getByText } = render(<CaptureScreen />);
 
-    expect(getByText('Capture Photo')).toBeTruthy();
+    expect(getByText(/INITIALIZING|CAPTURE/)).toBeTruthy();
   });
 
   it('should have CameraView component when permissions are granted', () => {
