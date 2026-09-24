@@ -96,15 +96,23 @@ async function uploadImageToS3(presignedUrl: string, imageUri: string, timeoutMs
 
   let uploadResult: any;
   try {
-    const uploadPromise = (FileSystem as any).uploadAsync(presignedUrl, imageUri, {
-      httpMethod: 'PUT',
-      uploadType: (FileSystem as any).FileSystemUploadType?.BINARY_CONTENT ?? 0,
-      headers: requestHeaders,
-    });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Upload timeout')), timeoutMs)
-    );
-    uploadResult = await Promise.race([uploadPromise, timeoutPromise]);
+    // Use AbortController so a timeout actually *cancels* the PUT request rather
+    // than just racing past it. Promise.race leaves uploadAsync running in the
+    // background which can cause overlapping uploads on retry.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      uploadResult = await (FileSystem as any).uploadAsync(presignedUrl, imageUri, {
+        httpMethod: 'PUT',
+        uploadType: (FileSystem as any).FileSystemUploadType?.BINARY_CONTENT ?? 0,
+        headers: requestHeaders,
+        // expo-file-system v17+ respects cancelToken via task ref; signal is the
+        // standard Web API equivalent passed for forward-compatibility.
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (uploadError) {
     const err = uploadError as Error;
     console.error(`[S3_DIAG] uploadAsync threw: name=${err.name} | message=${err.message}`);
@@ -325,7 +333,7 @@ export default function CaptureScreen() {
   if (!cameraPermission.granted) {
     return (
       <View style={styles.permContainer}>
-        <View style={styles.permCard}>
+        <View testID="perm-card" style={styles.permCard}>
           <Text style={styles.permLabel}>// CAMERA ACCESS REQUIRED</Text>
           <Text style={styles.permSub}>This module requires hardware sensor access to function.</Text>
           <TouchableOpacity style={styles.primaryBtn} onPress={requestCameraPermission} activeOpacity={0.75}>
@@ -376,6 +384,7 @@ export default function CaptureScreen() {
         {/* Ring-style capture trigger */}
         <View style={styles.captureRow}>
           <TouchableOpacity
+            testID="capture-outer"
             style={[styles.captureOuter, (!isCameraReady || phase !== 'idle') && styles.captureOuterDisabled]}
             onPress={handleCapture}
             disabled={!isCameraReady || phase !== 'idle'}

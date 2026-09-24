@@ -129,28 +129,27 @@ describe('CaptureScreen', () => {
     it('renders permission screen without layout overflow', () => {
       (Camera.useCameraPermissions as jest.Mock).mockReturnValue([{ granted: false }, mockRequestCameraPermission]);
       (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ status: 'granted' });
-      const { getByText } = render(<CaptureScreen />);
-      // Permission card uses width: '100%' — always safe
-      expect(getByText('GRANT PERMISSION')).toBeTruthy();
+      const { getByTestId } = render(<CaptureScreen />);
+      // permCard has style width:'100%' — assertWithinViewportBounds treats string widths as safe
+      const permCard = getByTestId('perm-card');
+      assertWithinViewportBounds(permCard, VIEWPORTS[preset]);
     });
 
     it('renders capture ring within viewport bounds', () => {
       (Camera.useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, mockRequestCameraPermission]);
       (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ status: 'granted' });
-      const { UNSAFE_root } = render(<CaptureScreen />);
-      // captureOuter is 72px — fits all viewports (smallest is 320px)
-      const viewport = VIEWPORTS[preset];
-      expect(72).toBeLessThanOrEqual(viewport.width);
-      expect(UNSAFE_root).toBeTruthy();
+      const { getByTestId } = render(<CaptureScreen />);
+      // captureOuter has style width:72, height:72 — assertWithinViewportBounds checks width <= viewport.width
+      const captureOuter = getByTestId('capture-outer');
+      assertWithinViewportBounds(captureOuter, VIEWPORTS[preset]);
     });
 
     it('renders scanner HUD within viewport width', () => {
       (Camera.useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, mockRequestCameraPermission]);
       (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ status: 'granted' });
       const { UNSAFE_root } = render(<CaptureScreen />);
-      // Scanner brackets use percentage positions (8%, 24%) — never fixed pixel overflow
+      // Scanner brackets use percentage positions and BRACKET=28px — safe on all viewports
       const viewport = VIEWPORTS[preset];
-      // BRACKET constant is 28px — safe on all viewports
       expect(28).toBeLessThanOrEqual(viewport.width);
       expect(UNSAFE_root).toBeTruthy();
     });

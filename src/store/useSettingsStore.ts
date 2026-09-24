@@ -1,6 +1,11 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface AppSettings {
+  /** Base URL for the PatchWork backend API.
+   *  Defaults to empty string — must be configured in Settings before uploads work.
+   *  Never defaults to a plain HTTP address so intercepted requests can't sniff data. */
   apiBase: string;
   hapticsEnabled: boolean;
   seedOnLaunch: boolean;
@@ -15,7 +20,7 @@ interface SettingsStore extends AppSettings {
 }
 
 const DEFAULTS: AppSettings = {
-  apiBase: 'http://192.168.4.86:3000',
+  apiBase: '',           // intentionally empty — user must set a valid HTTPS URL in Settings
   hapticsEnabled: true,
   seedOnLaunch: true,
   mapDefaultLat: 39.0501,
@@ -23,8 +28,16 @@ const DEFAULTS: AppSettings = {
   cameraQuality: 1.0,
 };
 
-export const useSettingsStore = create<SettingsStore>((set) => ({
-  ...DEFAULTS,
-  set: (partial) => set((s) => ({ ...s, ...partial })),
-  reset: () => set({ ...DEFAULTS }),
-}));
+export const useSettingsStore = create<SettingsStore>()(
+  persist(
+    (set) => ({
+      ...DEFAULTS,
+      set: (partial) => set((s) => ({ ...s, ...partial })),
+      reset: () => set({ ...DEFAULTS }),
+    }),
+    {
+      name: 'patchwork-settings', // AsyncStorage key
+      storage: createJSONStorage(() => AsyncStorage),
+    }
+  )
+);

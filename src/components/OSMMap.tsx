@@ -81,7 +81,27 @@ export default function OSMMap({ initialLat, initialLng, markers = [], userLocat
           return { radius: 7, fillColor: 'transparent', color: '#00FFFF', weight: 2, opacity: 0.65, fillOpacity: 0 };
         }
         
-        const markersData = ${JSON.stringify(markers)};
+        // ---------------------------------------------------------------------------
+        // Sanitized marker data — guard against XSS via crafted node IDs or coords.
+        // Only numeric lat/lng and a strictly-alphanumeric id survive serialisation.
+        // ---------------------------------------------------------------------------
+        function sanitizeMarker(m) {
+          return {
+            id:     String(m.id).replace(/[^a-zA-Z0-9_-]/g, ''),
+            lat:    isFinite(m.lat)  ? Number(m.lat)  : 0,
+            lng:    isFinite(m.lng)  ? Number(m.lng)  : 0,
+            status: ['pending','awaiting_verification','verified','denied','archived']
+                      .includes(m.status) ? m.status : 'pending',
+          };
+        }
+
+        const markersData = ${JSON.stringify(markers.map(m => ({
+          id:     String(m.id).replace(/[^a-zA-Z0-9_-]/g, ''),
+          lat:    isFinite(m.lat)  ? Number(m.lat)  : 0,
+          lng:    isFinite(m.lng)  ? Number(m.lng)  : 0,
+          status: ['pending','awaiting_verification','verified','denied','archived']
+                    .includes(m.status ?? '') ? m.status : 'pending',
+        })))};
         markersData.forEach(marker => {
           const circle = L.circleMarker([marker.lat, marker.lng], getMarkerStyle(marker.status)).addTo(map);
           circle.on('click', () => {
@@ -90,7 +110,15 @@ export default function OSMMap({ initialLat, initialLng, markers = [], userLocat
         });
         
         let userMarker = null;
-        const userLocationData = ${JSON.stringify(userLocation)};
+        const userLocationData = ${JSON.stringify(
+          userLocation
+            ? {
+                lat:     isFinite(userLocation.lat)     ? Number(userLocation.lat)     : 0,
+                lng:     isFinite(userLocation.lng)     ? Number(userLocation.lng)     : 0,
+                heading: isFinite(userLocation.heading) ? Number(userLocation.heading) % 360 : 0,
+              }
+            : null
+        )};
         if (userLocationData) {
           const userIcon = L.divIcon({
             className: 'user-marker-container',

@@ -36,6 +36,13 @@ const TAB_ICONS: Record<string, FeatherName> = {
 export default function RootNavigator() {
   const insets = useSafeAreaInsets();
   const session = useAuthStore((s) => s.session);
+  // initializing: true until getSession() resolves — prevents AuthScreen flash for returning users
+  const initializing = useAuthStore((s) => s.initializing);
+
+  if (initializing) {
+    // Blank navy canvas while session restores — no flash of AuthScreen
+    return null;
+  }
 
   if (!session) {
     return (
@@ -48,6 +55,8 @@ export default function RootNavigator() {
   return (
     <NavigationContainer theme={navTheme}>
       <Tab.Navigator
+        // Map is the primary launch screen per AGENTS.md requirements
+        initialRouteName="Map"
         screenOptions={({ route }) => ({
           headerShown: false,
           tabBarActiveTintColor: '#00FFFF',
