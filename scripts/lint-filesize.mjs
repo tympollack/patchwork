@@ -3,7 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT_DIR = process.cwd();
-const SCAN_DIRS = ['src'];
+// Scan both src/ (components, screens, hooks) and app/ (Expo Router / page entrypoints).
+// The `page` rule pattern matches app/**/(page|layout|loading).tsx — adding app/ here
+// ensures those files are actually checked against the page-coordinator line limit.
+const SCAN_DIRS = ['src', 'app'];
 
 // Grandfathered file size limits (ratchet mechanism).
 // Files here are strictly capped at their legacy size and must NOT grow larger.

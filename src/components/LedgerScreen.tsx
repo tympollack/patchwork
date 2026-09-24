@@ -226,6 +226,7 @@ export default function LedgerScreen() {
       <View style={styles.divider} />
 
       <ScrollView
+        testID="node-list"
         style={styles.list}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}

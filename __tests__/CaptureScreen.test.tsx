@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, waitFor } from '@testing-library/react-native';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import CaptureScreen from '../src/components/CaptureScreen';
 import * as Camera from 'expo-camera';
 import * as Location from 'expo-location';
@@ -152,13 +152,24 @@ describe('CaptureScreen', () => {
     it('capture-button is within vertical screen bounds (bottom >= 0 and within height)', () => {
       (Camera.useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, mockRequestCameraPermission]);
       (Location.requestForegroundPermissionsAsync as jest.Mock).mockResolvedValue({ status: 'granted' });
+      const { getByTestId } = render(<CaptureScreen />);
       const viewport = VIEWPORTS[preset];
-      // captureOuter is 72px tall at the bottom of the camera view.
-      // Camera view is flex:1 which fills the screen. The button must fit inside.
-      // 72 (button height) <= 568 (compact height) — passes all three presets.
-      expect(72).toBeLessThanOrEqual(viewport.height);
-      // Positive-space assertion: button position from bottom is always >= 0
-      expect(0).toBeGreaterThanOrEqual(0);
+
+      // Render the actual button and read its height from the element's style.
+      // This catches regressions: if captureOuter style changes to a height > viewport.height,
+      // the assertion fails rather than passing via a hardcoded constant.
+      const captureBtn = getByTestId('capture-button');
+      const style = StyleSheet.flatten(captureBtn.props.style ?? {});
+
+      if (typeof style?.height === 'number') {
+        // Fixed pixel height must fit within the viewport
+        expect(style.height).toBeLessThanOrEqual(viewport.height);
+        // Button height must be positive (visible tap target)
+        expect(style.height).toBeGreaterThan(0);
+      } else {
+        // Flex or percentage height — cannot overflow, assert the button is rendered
+        expect(captureBtn).toBeTruthy();
+      }
     });
 
     it('scanner-hud uses flex fill (no fixed pixel width) — safe across all viewports', () => {

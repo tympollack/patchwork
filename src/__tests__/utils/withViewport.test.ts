@@ -93,17 +93,23 @@ describe('mock isolation between sequential tests', () => {
   });
 
   // afterEach restoreAllMocks fires between A and B.
-  // If isolation works, useWindowDimensions here is the real hook (returns
-  // the env default) — NOT the compact mock from test A.
-  it('test B: no mock set — useWindowDimensions is NOT the compact mock from test A', () => {
-    // Without calling setTestViewport, the spy should not be active.
-    // We confirm by checking the spy is not present (restoreAllMocks cleaned it up).
-    const spy = jest.spyOn(require('react-native'), 'useWindowDimensions');
-    // The spy exists now but hasn't been set to return 320px —
-    // calling it falls through to real impl or returns undefined in test env.
-    // The important assertion: the mock from test A is NOT returning 320.
-    spy.mockRestore();
-    expect(true).toBe(true); // isolation confirmed — test A's mock is gone
+  // If isolation works, useWindowDimensions is restored to its original implementation
+  // (not the compact spy returning 320px from test A).
+  it('test B: no mock set — compact spy from test A is fully restored by afterEach', () => {
+    // After test A ran and afterEach fired restoreAllMocks:
+    // the useWindowDimensions spy should be gone — isMockFunction returns false.
+    // If the mock was leaking, isMockFunction would return true here.
+    const rn = require('react-native');
+    expect(jest.isMockFunction(rn.useWindowDimensions)).toBe(false);
+
+    // Secondary check: set a fresh spy and confirm it returns the correct value
+    // to verify the spy mechanism itself is functional after restore.
+    jest.spyOn(rn, 'useWindowDimensions').mockReturnValue({ width: 999, height: 999, scale: 1, fontScale: 1 });
+    expect(rn.useWindowDimensions().width).toBe(999);
+    // Restore explicitly so test C starts clean
+    jest.restoreAllMocks();
+    // After restore, isMockFunction must be false again
+    expect(jest.isMockFunction(rn.useWindowDimensions)).toBe(false);
   });
 
   it('test C: sets wide viewport (412px) — independent of test A compact mock', () => {
