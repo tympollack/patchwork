@@ -112,6 +112,7 @@ const LedgerItem = ({ item, isExpanded, onToggle, onUpdateDescription }: any) =>
               )}
               {isEditable && (
                 <TouchableOpacity
+                  testID="update-log-btn"
                   style={[styles.updateBtn, saveStatus === 'saved' && styles.updateBtnSaved, saveStatus === 'error' && styles.updateBtnError]}
                   onPress={handleSave}
                 >
@@ -122,8 +123,8 @@ const LedgerItem = ({ item, isExpanded, onToggle, onUpdateDescription }: any) =>
               )}
             </View>
 
-            {/* RIGHT: map thumbnail */}
-            <View style={styles.mapContainer}>
+            {/* RIGHT: map thumbnail — width:'45%' keeps it flex-relative, never rigid px */}
+            <View testID="map-container" style={styles.mapContainer}>
               <Image
                 source={{ uri: `https://static-maps.yandex.ru/1.x/?ll=${item.long},${item.lat}&z=15&l=map&size=200,200` }}
                 style={styles.thumbnail}
@@ -225,6 +226,7 @@ export default function LedgerScreen() {
       <View style={styles.divider} />
 
       <ScrollView
+        testID="node-list"
         style={styles.list}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}

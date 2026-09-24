@@ -352,11 +352,13 @@ export default function CaptureScreen() {
         ref={cameraRef}
         onCameraReady={() => setIsCameraReady(true)}
       >
-        {/* Scanner corner brackets */}
-        <View style={styles.bracketTL} />
-        <View style={styles.bracketTR} />
-        <View style={styles.bracketBL} />
-        <View style={styles.bracketBR} />
+        {/* Scanner HUD — corner brackets. testID used for viewport boundary tests. */}
+        <View testID="scanner-hud" style={styles.scannerHud} pointerEvents="none">
+          <View style={styles.bracketTL} />
+          <View style={styles.bracketTR} />
+          <View style={styles.bracketBL} />
+          <View style={styles.bracketBR} />
+        </View>
 
         {/* Network error terminal banner */}
         {networkError && (
@@ -384,7 +386,7 @@ export default function CaptureScreen() {
         {/* Ring-style capture trigger */}
         <View style={styles.captureRow}>
           <TouchableOpacity
-            testID="capture-outer"
+            testID="capture-button"
             style={[styles.captureOuter, (!isCameraReady || phase !== 'idle') && styles.captureOuterDisabled]}
             onPress={handleCapture}
             disabled={!isCameraReady || phase !== 'idle'}
@@ -419,6 +421,11 @@ const THICK = 2;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0A1128' },
   camera: { flex: 1 },
+
+  // Scanner HUD overlay — wraps all four corner brackets.
+  // Uses flex:1 + absolute fill so it tracks the camera view exactly.
+  // No fixed pixel width — safe on all viewport sizes.
+  scannerHud: { ...StyleSheet.absoluteFillObject, flex: 1 },
 
   // Corner scanner brackets
   bracketTL: {

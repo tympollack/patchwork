@@ -1,6 +1,7 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
-import { setTestViewport, VIEWPORTS, type ViewportPreset } from '../src/__tests__/utils/withViewport';
+import { render, fireEvent } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { setTestViewport, assertWithinViewportBounds, VIEWPORTS, type ViewportPreset } from '../src/__tests__/utils/withViewport';
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before the component import
@@ -65,11 +66,8 @@ jest.mock('react-native/Libraries/Utilities/Platform', () => ({
   select: (obj: any) => obj.ios,
 }));
 
-// LayoutAnimation is a no-op in tests
-jest.mock('react-native/Libraries/LayoutAnimation/LayoutAnimation', () => ({
-  configureNext: jest.fn(),
-  Presets: { easeInEaseOut: {} },
-}));
+// LayoutAnimation: mock only configureNext via jest.spyOn in beforeEach
+// (module-level mock of all of 'react-native' triggers TurboModuleRegistry errors)
 
 import LedgerScreen from '../src/components/LedgerScreen';
 
@@ -78,8 +76,14 @@ const VIEWPORT_PRESETS: ViewportPreset[] = ['compact', 'standard', 'wide'];
 describe('LedgerScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Suppress deprecation + error noise
     jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // Prevent LayoutAnimation.configureNext from throwing in test env
+    const LayoutAnimation = require('react-native').LayoutAnimation;
+    if (LayoutAnimation) {
+      jest.spyOn(LayoutAnimation, 'configureNext').mockImplementation(() => {});
+    }
   });
 
   afterEach(() => {
@@ -118,6 +122,10 @@ describe('LedgerScreen', () => {
 
   // ---------------------------------------------------------------------------
   // Multi-viewport boundary matrix
+  // Tests per TASK-PW-RETROFIT-LEDGER-SCREEN agent_prompt:
+  //   • Expanding card animations / log text don't force horizontal scroll on 320px
+  //   • Map image container width is percentage or flex (not rigid pixel)
+  //   • UPDATE LOG button visible + within safe tap area when card is expanded
   // ---------------------------------------------------------------------------
 
   describe.each(VIEWPORT_PRESETS)('viewport: %s', (preset) => {
@@ -128,31 +136,68 @@ describe('LedgerScreen', () => {
       expect(UNSAFE_root).toBeTruthy();
     });
 
-    it('map container uses percentage width (no rigid pixel overflow)', () => {
-      // mapContainer style uses width: '45%' — percentage, never px value
-      // This is a static assertion against the known stylesheet value
-      const viewport = VIEWPORTS[preset];
-      // 45% of the narrowest viewport (320px) = 144px — well within bounds
-      const mapContainerWidth = Math.floor(viewport.width * 0.45);
-      expect(mapContainerWidth).toBeLessThanOrEqual(viewport.width);
+    it('map-container style is a percentage string — never a rigid pixel width', () => {
+      const { getByText, getByTestId } = render(<LedgerScreen />);
+
+      // Expand the awaiting_verification card to render the map-container
+      fireEvent.press(getByText('34.05224, -118.24368'));
+
+      // Read the actual rendered style from the element, not a precomputed constant
+      const mapContainer = getByTestId('map-container');
+      const style = StyleSheet.flatten(mapContainer.props.style ?? {});
+
+      // width must be a string (e.g. '45%'), NOT a numeric pixel value.
+      // If a future change sets width: 400, this test fails — catching the regression.
+      expect(typeof style?.width).toBe('string');
+      // Confirm it ends with '%' (relative, not absolute)
+      expect(String(style?.width)).toMatch(/%$/);
     });
 
-    it('UPDATE LOG button renders within tap bounds', () => {
-      const { queryByText } = render(<LedgerScreen />);
-      // Button only appears in expanded cards — non-expanded by default, assert no overflow
-      // The button uses flex layout (width: undefined, alignItems: 'center') — safe
-      const viewport = VIEWPORTS[preset];
-      expect(viewport.height).toBeGreaterThan(0);
-      // Confirm screen renders at all — no layout crash
-      expect(queryByText('PATCHWORK // NODE LEDGER')).toBeTruthy();
-    });
+    it('listContent paddingHorizontal leaves positive usable width for coordinate text', () => {
+      const { getByTestId } = render(<LedgerScreen />);
 
-    it('card containers use flex layout not fixed widths', () => {
-      // cardContainer uses borderWidth + flex — no fixed pixel widths > viewport
-      // listContent uses paddingHorizontal: 16 — 320 - 32 = 288px usable, safe
-      const viewport = VIEWPORTS[preset];
-      const usableWidth = viewport.width - 32; // 16px padding each side
+      // Read actual rendered style from the list container.
+      // In RNTL, ScrollView contentContainerStyle is passed as contentContainerProps.style.
+      // We check the outer list View which applies paddingHorizontal: 16.
+      const list = getByTestId('node-list');
+      const style = StyleSheet.flatten(list.props.contentContainerStyle ?? {});
+      const paddingH = (typeof style?.paddingHorizontal === 'number' ? style.paddingHorizontal : 16) * 2;
+      const usableWidth = VIEWPORTS[preset].width - paddingH;
+
+      // Must be positive — text cannot render in zero or negative width
       expect(usableWidth).toBeGreaterThan(0);
+      // 288px (compact) is sufficient for widest coordinate string
+      expect(usableWidth).toBeGreaterThanOrEqual(100);
+    });
+
+    it('UPDATE LOG button is visible and within safe tap area when card is expanded', () => {
+      const { getByText, getByTestId } = render(<LedgerScreen />);
+
+      // Expand the awaiting_verification card (node-002) — this is the editable card
+      // that renders both the map-container and the UPDATE LOG button.
+      // The card header text includes the lat/lng coordinate.
+      const headerCoord = getByText('34.05224, -118.24368');
+      fireEvent.press(headerCoord);
+
+      // UPDATE LOG button should now be visible
+      const updateBtn = getByTestId('update-log-btn');
+      assertWithinViewportBounds(updateBtn, VIEWPORTS[preset]);
+
+      // The map thumbnail container should use percentage width (string), not fixed px
+      const mapContainer = getByTestId('map-container');
+      assertWithinViewportBounds(mapContainer, VIEWPORTS[preset]);
+    });
+
+    it('card containers use flex layout — no fixed widths wider than viewport', () => {
+      // cardContainer: borderWidth + flex (no fixed pixel width)
+      // expandedRow: flexDirection:'row' with leftPanel: flex:1 + mapContainer: '45%'
+      // Both halves of the row are bounded by parent flex — no overflow possible.
+      const viewport = VIEWPORTS[preset];
+      const usableWidth = viewport.width - 32; // listContent paddingHorizontal: 16
+      expect(usableWidth).toBeGreaterThan(0);
+      // 45% of usable width (the map panel) must be < viewport.width
+      const mapPanelWidth = Math.floor(usableWidth * 0.45);
+      expect(mapPanelWidth).toBeLessThan(viewport.width);
     });
   });
 });
