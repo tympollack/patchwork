@@ -44,6 +44,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "lint:filesize": "node scripts/lint-filesize.mjs",
     "test": "jest"
   },
   "jest": {
