@@ -45,7 +45,7 @@ function makeEnv(overrides: Partial<Record<string, unknown>> = {}) {
     R2_SECRET_ACCESS_KEY: 'test-secret',
     R2_BUCKET_NAME: 'patchwork-ports-stag',
     CRON_SECRET: 'test-cron-secret',
-    WEBHOOK_URL: 'https://api.patchwork.local/webhook/critter-bounty',
+    WEBHOOK_URL: 'https://api.patchwork.org/webhook/critter-bounty',
     ...overrides,
   };
 }
@@ -150,6 +150,51 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
     expect(body.required_headers['Content-Type']).toBe('image/jpeg');
     expect(body.expires_in_seconds).toBe(900);
     expect(body.attestation_status).toBe('mock_success');
+  });
+
+  it('POST /api/ports/request-upload rejects with 403 when REQUIRE_HARDWARE_ATTESTATION is true and attestation header is missing or invalid', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'usr-123' }),
+    }));
+
+    const req = new Request('https://worker.test/api/ports/request-upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-jwt-token' },
+    });
+    const env = makeEnv({ REQUIRE_HARDWARE_ATTESTATION: 'true' });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('Hardware attestation');
+  });
+
+  it('POST /api/ports/request-upload accepts with verified attestation when token is provided', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'usr-123' }),
+    }));
+
+    mockGetSignedUrl.mockResolvedValue(
+      'https://patchwork-ports-stag.test-account-id.r2.cloudflarestorage.com/ports/test.jpg?X-Amz-Signature=abc'
+    );
+
+    const req = new Request('https://worker.test/api/ports/request-upload', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer valid-jwt-token',
+        'x-device-attestation': 'valid-device-proof-abc',
+      },
+    });
+    const env = makeEnv({ REQUIRE_HARDWARE_ATTESTATION: 'true' });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.attestation_status).toBe('verified');
   });
 
   it('POST /api/cron/bounty-trigger rejects without Bearer CRON_SECRET', async () => {
@@ -302,6 +347,19 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
     const body = (await res.json()) as any;
     expect(body.skipped).toContain('WEBHOOK_URL');
   });
+
+  it('POST /api/cron/bounty-trigger returns skipped message when WEBHOOK_URL contains .local placeholder', async () => {
+    const req = new Request('https://worker.test/api/cron/bounty-trigger', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-cron-secret' },
+    });
+    const env = makeEnv({ WEBHOOK_URL: 'https://api.patchwork.local/webhook/critter-bounty' });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.skipped).toContain('placeholder');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -318,10 +376,21 @@ describe('Worker Queue Consumer (worker.queue)', () => {
       arrayBuffer: vi.fn().mockResolvedValue(IMAGE_BYTES.buffer),
     });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => '',
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/rest/v1/nodes?node_id=eq.')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{ node_id: UPLOAD_ID, status: 'pending', latitude: 40.7128, longitude: -74.006 }],
+          text: async () => '',
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => '',
+        json: async () => ({}),
+      });
     }));
 
     const msg = makeMessage();
@@ -338,6 +407,114 @@ describe('Worker Queue Consumer (worker.queue)', () => {
     expect(env.R2_STAGING.delete).toHaveBeenCalledWith(KEY);
     expect(msg.ack).toHaveBeenCalledTimes(1);
     expect(msg.retry).not.toHaveBeenCalled();
+  });
+
+  it('discards unverified staging uploads when no pending node exists', async () => {
+    const env = makeEnv();
+    (env.R2_STAGING.get as Mock).mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(IMAGE_BYTES.buffer),
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [],
+      text: async () => '',
+    }));
+
+    const msg = makeMessage();
+    const batch = { messages: [msg] };
+
+    await worker.queue(batch as any, env as any);
+
+    expect(env.R2_STAGING.delete).toHaveBeenCalledWith(KEY);
+    expect(env.R2_PRODUCTION.put).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects and deletes uploads exceeding max size limit (25MB)', async () => {
+    const env = makeEnv();
+    const oversizedBuffer = new Uint8Array(26 * 1024 * 1024);
+    (env.R2_STAGING.get as Mock).mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(oversizedBuffer.buffer),
+    });
+
+    const msg = makeMessage();
+    const batch = { messages: [msg] };
+
+    await worker.queue(batch as any, env as any);
+
+    expect(env.R2_STAGING.delete).toHaveBeenCalledWith(KEY);
+    expect(env.R2_PRODUCTION.put).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects and deletes non-JPEG uploads', async () => {
+    const env = makeEnv();
+    const nonJpegBuffer = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header
+    (env.R2_STAGING.get as Mock).mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(nonJpegBuffer.buffer),
+    });
+
+    const msg = makeMessage();
+    const batch = { messages: [msg] };
+
+    await worker.queue(batch as any, env as any);
+
+    expect(env.R2_STAGING.delete).toHaveBeenCalledWith(KEY);
+    expect(env.R2_PRODUCTION.put).not.toHaveBeenCalled();
+    expect(msg.ack).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves verified status on retry without reverting to awaiting_verification', async () => {
+    const env = makeEnv();
+    (env.R2_STAGING.get as Mock).mockResolvedValue({
+      arrayBuffer: vi.fn().mockResolvedValue(IMAGE_BYTES.buffer),
+    });
+
+    let upsertPayload: any = null;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, opts?: any) => {
+      if (url.includes('/rest/v1/nodes?node_id=eq.')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{ node_id: UPLOAD_ID, status: 'verified', latitude: 40.7128, longitude: -74.006 }],
+          text: async () => '',
+        });
+      }
+      if (opts?.method === 'POST') {
+        upsertPayload = JSON.parse(opts.body);
+        return Promise.resolve({ ok: true, status: 200, text: async () => '' });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    }));
+
+    const msg = makeMessage();
+    const batch = { messages: [msg] };
+
+    await worker.queue(batch as any, env as any);
+
+    expect(upsertPayload).toBeDefined();
+    expect(upsertPayload.status).toBe('verified');
+    expect(msg.ack).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips events from mismatched buckets', async () => {
+    const env = makeEnv();
+    const msg = makeMessage({
+      body: {
+        action: 'PutObject',
+        object: { key: KEY, size: IMAGE_BYTES.byteLength, etag: 'x' },
+        account: 'test',
+        bucket: 'some-other-bucket',
+      },
+    });
+    const batch = { messages: [msg] };
+
+    await worker.queue(batch as any, env as any);
+
+    expect(msg.ack).toHaveBeenCalledTimes(1);
+    expect(env.R2_STAGING.get).not.toHaveBeenCalled();
   });
 
   it('nacks (retries) when staging object is missing', async () => {
@@ -360,10 +537,20 @@ describe('Worker Queue Consumer (worker.queue)', () => {
       arrayBuffer: vi.fn().mockResolvedValue(IMAGE_BYTES.buffer),
     });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      text: async () => 'Internal Server Error',
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/rest/v1/nodes?node_id=eq.')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{ node_id: UPLOAD_ID, status: 'pending', latitude: 40.7128, longitude: -74.006 }],
+          text: async () => '',
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 500,
+        text: async () => 'Internal Server Error',
+      });
     }));
 
     const msg = makeMessage();

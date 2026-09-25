@@ -33,6 +33,17 @@ Consolidated Cloudflare Worker replacing the retired Render backend and AWS Lamb
 - `R2_BUCKET_NAME`: Default staging bucket name (`patchwork-ports-stag`).
 - `WEBHOOK_URL`: Target URL for the critter bounty webhook.
 - `ALLOWED_ORIGINS`: Allowed CORS origins for web clients (`*` or comma-separated list e.g. `https://patchwork.app,http://localhost:8081`).
+- `REQUIRE_HARDWARE_ATTESTATION`: Set to `"true"` to enforce hardware attestation headers (`x-device-attestation` / `x-hardware-attestation`) on upload requests.
+
+### R2 Event Notification Setup
+To route staging bucket upload events (`object-create`) into the Cloudflare Queue, provision the notification rule via Wrangler:
+```sh
+npx wrangler r2 bucket notification create patchwork-ports-stag --event-type object-create --queue patchwork-upload-queue
+```
+To verify the notification:
+```sh
+npx wrangler r2 bucket notification list patchwork-ports-stag
+```
 
 ### Wrangler Secrets (`wrangler secret put <NAME>`)
 Configure these secrets in Cloudflare for production:

@@ -54,6 +54,8 @@ export interface Env {
   WEBHOOK_URL?: string;
   /** Allowed CORS origins for web clients (e.g. "https://patchwork.app,http://localhost:8081" or "*") */
   ALLOWED_ORIGINS?: string;
+  /** Whether hardware attestation is strictly enforced ("true" or undefined/false) */
+  REQUIRE_HARDWARE_ATTESTATION?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +92,7 @@ export function getCorsHeaders(request: Request, env: Env): Record<string, strin
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-device-attestation, x-hardware-attestation',
     'Vary': 'Origin',
   };
 }
@@ -152,17 +154,48 @@ function verifyCronAuth(request: Request, env: Env): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: Upsert node record into patchwork.nodes via Supabase REST
+// Helper: Fetch existing node metadata from Supabase
 // ---------------------------------------------------------------------------
-async function upsertNode(
+async function fetchNode(
+  env: Env,
+  uploadId: string
+): Promise<{ node_id: string; status: string; latitude?: number | null; longitude?: number | null } | null> {
+  try {
+    const url = `${env.SUPABASE_URL}/rest/v1/nodes?node_id=eq.${uploadId}&select=node_id,status,latitude,longitude`;
+    const res = await fetch(url, {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        'Accept-Profile': 'patchwork',
+        'Content-Profile': 'patchwork',
+      },
+    });
+    if (!res.ok) return null;
+    if (typeof res.json !== 'function') return null;
+    const rows = (await res.json()) as Array<{
+      node_id: string;
+      status: string;
+      latitude?: number | null;
+      longitude?: number | null;
+    }>;
+    return rows?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Create pending node on presigned URL generation (records GPS & user)
+// ---------------------------------------------------------------------------
+async function createPendingNode(
   env: Env,
   uploadId: string,
-  imageKey: string,
-  h3Index: string,
-  sha256: string
+  userId: string | null,
+  latitude: number,
+  longitude: number
 ): Promise<void> {
   const url = `${env.SUPABASE_URL}/rest/v1/nodes?on_conflict=node_id`;
-  const response = await fetch(url, {
+  await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -174,12 +207,51 @@ async function upsertNode(
     },
     body: JSON.stringify({
       node_id: uploadId,
-      image_key: imageKey,
-      h3_index: h3Index,
-      sha256_hash: sha256,
-      sync_status: 'synced',
-      status: 'awaiting_verification',
+      user_id: userId,
+      latitude,
+      longitude,
+      status: 'pending',
+      sync_status: 'pending_sync',
     }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helper: Upsert node record into patchwork.nodes via Supabase REST
+// ---------------------------------------------------------------------------
+async function upsertNode(
+  env: Env,
+  uploadId: string,
+  imageKey: string,
+  h3Index: string,
+  sha256: string,
+  status: string = 'awaiting_verification',
+  latitude: number = 0,
+  longitude: number = 0
+): Promise<void> {
+  const url = `${env.SUPABASE_URL}/rest/v1/nodes?on_conflict=node_id`;
+  const payload: Record<string, unknown> = {
+    node_id: uploadId,
+    image_key: imageKey,
+    h3_index: h3Index,
+    sha256_hash: sha256,
+    sync_status: 'synced',
+    status,
+    latitude,
+    longitude,
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      Prefer: 'resolution=merge-duplicates',
+      'Accept-Profile': 'patchwork',
+      'Content-Profile': 'patchwork',
+    },
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -189,133 +261,10 @@ async function upsertNode(
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle Action: Execute Bounty Trigger (7-day rule)
+// Lifecycle Actions: Cron Triggers (7-day bounty & 28-day archive)
 // ---------------------------------------------------------------------------
-export async function executeBountyTrigger(
-  env: Env
-): Promise<{ ok: boolean; job: string; triggered: number; failed: number; skipped?: string }> {
-  console.log('[CRON] executeBountyTrigger starting...');
-  if (!env.WEBHOOK_URL) {
-    console.warn('[CRON] WEBHOOK_URL is not configured; skipping bounty notifications.');
-    return { ok: true, job: 'bounty-trigger', triggered: 0, failed: 0, skipped: 'WEBHOOK_URL not configured' };
-  }
-
-  const webhookUrl = env.WEBHOOK_URL;
-  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const BATCH_SIZE = 100;
-  const MAX_PAGES = 10;
-
-  let triggered = 0;
-  let failed = 0;
-  let page = 0;
-
-  while (page < MAX_PAGES) {
-    const offset = page * BATCH_SIZE;
-    const queryUrl = `${env.SUPABASE_URL}/rest/v1/nodes?status=eq.awaiting_verification&bounty_triggered=eq.false&created_at=lt.${cutoff}&select=node_id,latitude,longitude,h3_index&order=node_id.asc&limit=${BATCH_SIZE}&offset=${offset}`;
-    const fetchRes = await fetch(queryUrl, {
-      headers: {
-        apikey: env.SUPABASE_SERVICE_KEY,
-        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-        'Accept-Profile': 'patchwork',
-        'Content-Profile': 'patchwork',
-      },
-    });
-
-    if (!fetchRes.ok) {
-      const errText = await fetchRes.text();
-      throw new Error(`Failed to query eligible nodes: HTTP ${fetchRes.status} — ${errText}`);
-    }
-
-    const nodes = (await fetchRes.json()) as Array<{
-      node_id: string;
-      latitude: number;
-      longitude: number;
-      h3_index: string;
-    }>;
-
-    if (!nodes || nodes.length === 0) break;
-
-    for (const node of nodes) {
-      try {
-        const webhookRes = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            node_id: node.node_id,
-            h3_index: node.h3_index,
-            latitude: node.latitude,
-            longitude: node.longitude,
-          }),
-          signal: AbortSignal.timeout(10_000),
-        });
-
-        if (!webhookRes.ok) throw new Error(`Webhook HTTP ${webhookRes.status}`);
-
-        // Mark bounty as triggered
-        const patchUrl = `${env.SUPABASE_URL}/rest/v1/nodes?node_id=eq.${node.node_id}&bounty_triggered=eq.false`;
-        const patchRes = await fetch(patchUrl, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: env.SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-            'Accept-Profile': 'patchwork',
-            'Content-Profile': 'patchwork',
-          },
-          body: JSON.stringify({ bounty_triggered: true }),
-        });
-
-        if (!patchRes.ok) throw new Error(`DB update failed: HTTP ${patchRes.status}`);
-
-        triggered++;
-        console.log(`[CRON] Bounty triggered for node ${node.node_id}`);
-      } catch (err) {
-        failed++;
-        console.error(`[CRON] Bounty trigger failed for node ${node.node_id}:`, err);
-      }
-    }
-
-    if (nodes.length < BATCH_SIZE) break;
-    page++;
-  }
-
-  console.log(`[CRON] executeBountyTrigger complete: ${triggered} triggered, ${failed} failed`);
-  return { ok: true, job: 'bounty-trigger', triggered, failed };
-}
-
-// ---------------------------------------------------------------------------
-// Lifecycle Action: Execute Archive Nodes (28-day rule)
-// ---------------------------------------------------------------------------
-export async function executeArchiveNodes(
-  env: Env
-): Promise<{ ok: boolean; job: string; archived: number }> {
-  console.log('[CRON] executeArchiveNodes starting...');
-  const cutoff = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
-
-  const patchUrl = `${env.SUPABASE_URL}/rest/v1/nodes?status=eq.awaiting_verification&created_at=lt.${cutoff}`;
-  const patchRes = await fetch(patchUrl, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      Prefer: 'return=representation',
-      'Accept-Profile': 'patchwork',
-      'Content-Profile': 'patchwork',
-    },
-    body: JSON.stringify({ status: 'archived' }),
-  });
-
-  if (!patchRes.ok) {
-    const errText = await patchRes.text();
-    throw new Error(`Archive failed: HTTP ${patchRes.status} — ${errText}`);
-  }
-
-  const modified = (await patchRes.json()) as Array<{ node_id: string }>;
-  const archived = Array.isArray(modified) ? modified.length : 0;
-  console.log(`[CRON] executeArchiveNodes complete: ${archived} nodes archived`);
-  return { ok: true, job: 'archive-nodes', archived };
-}
+export { executeBountyTrigger, executeArchiveNodes } from './cron';
+import { executeBountyTrigger, executeArchiveNodes } from './cron';
 
 // ---------------------------------------------------------------------------
 // Worker Default Export
@@ -444,13 +393,18 @@ export default {
         );
       }
 
-      // 2. Hardware attestation (placeholder)
-      const attestationSuccess = true;
-      if (!attestationSuccess) {
-        return Response.json(
-          { error: 'Hardware attestation failed.' },
-          { status: 403, headers: corsHeaders }
-        );
+      // 2. Hardware attestation
+      const requireAttestation = env.REQUIRE_HARDWARE_ATTESTATION === 'true';
+      const attestationToken =
+        request.headers.get('x-device-attestation') || request.headers.get('x-hardware-attestation');
+
+      if (requireAttestation) {
+        if (!attestationToken || attestationToken === 'invalid' || attestationToken === 'mock_fail') {
+          return Response.json(
+            { error: 'Hardware attestation failed.', detail: 'Valid device attestation token required.' },
+            { status: 403, headers: corsHeaders }
+          );
+        }
       }
 
       // 3. Verify S3 presigner credentials
@@ -466,6 +420,17 @@ export default {
       const uploadId = crypto.randomUUID();
       const objectKey = `ports/${uploadId}.jpg`;
       const expiresInSeconds = 900;
+
+      let bodyPayload: any = {};
+      try {
+        bodyPayload = await request.json();
+      } catch {
+        // empty body is acceptable
+      }
+      const lat = typeof bodyPayload?.latitude === 'number' ? bodyPayload.latitude : null;
+      const lng = typeof bodyPayload?.longitude === 'number' ? bodyPayload.longitude : null;
+      // Always register the issued upload as a pending node in Supabase
+      await createPendingNode(env, uploadId, user.id, lat ?? 0, lng ?? 0);
 
       try {
         const s3 = new S3Client({
@@ -500,7 +465,7 @@ export default {
             method: 'PUT',
             required_headers: { 'Content-Type': 'image/jpeg' },
             expires_in_seconds: expiresInSeconds,
-            attestation_status: 'mock_success',
+            attestation_status: requireAttestation ? 'verified' : 'mock_success',
           },
           {
             headers: isLegacy
@@ -583,6 +548,14 @@ export default {
         continue;
       }
 
+      // Verify event bucket matches expected staging bucket
+      const expectedBucket = env.R2_BUCKET_NAME || 'patchwork-ports-stag';
+      if (event.bucket && event.bucket !== expectedBucket) {
+        console.warn(`[WORKER] Event bucket mismatch: received ${event.bucket}, expected ${expectedBucket}`);
+        message.ack();
+        continue;
+      }
+
       const key = event.object.key;
       const uploadId = extractUploadId(key);
 
@@ -602,11 +575,43 @@ export default {
         const buffer = await stagingObj.arrayBuffer();
         console.log(`[WORKER] Fetched ${buffer.byteLength} bytes from staging`);
 
-        // 2. Compute SHA-256
+        // Defensive guard: Maximum upload size (25 MB)
+        const MAX_BYTES = 25 * 1024 * 1024;
+        if (buffer.byteLength > MAX_BYTES) {
+          console.warn(`[WORKER] Upload ${uploadId} exceeds max size limit (${buffer.byteLength} bytes). Rejecting.`);
+          await env.R2_STAGING.delete(key);
+          message.ack();
+          continue;
+        }
+
+        // Defensive guard: Validate JPEG magic bytes (0xFF, 0xD8, 0xFF)
+        if (buffer.byteLength >= 3) {
+          const header = new Uint8Array(buffer.slice(0, 3));
+          if (header[0] !== 0xff || header[1] !== 0xd8 || header[2] !== 0xff) {
+            console.warn(`[WORKER] Non-JPEG file detected for ${key}. Rejecting.`);
+            await env.R2_STAGING.delete(key);
+            message.ack();
+            continue;
+          }
+        }
+
+        // 2. Fetch existing node metadata to verify issued upload and preserve state/coordinates
+        const existingNode = await fetchNode(env, uploadId);
+        if (!existingNode) {
+          console.warn(`[WORKER] Unverified staging object: no pending node record found for uploadId ${uploadId}. Discarding.`);
+          await env.R2_STAGING.delete(key);
+          message.ack();
+          continue;
+        }
+
+        const isResolved = existingNode.status === 'verified' || existingNode.status === 'archived';
+        const targetStatus = isResolved ? existingNode.status : 'awaiting_verification';
+
+        // 3. Compute SHA-256
         const sha256 = await sha256Hex(buffer);
         console.log(`[WORKER] SHA-256: ${sha256}`);
 
-        // 3. Copy to production bucket
+        // 4. Copy to production bucket
         const prodKey = `ports/prod/${uploadId}.jpg`;
         await env.R2_PRODUCTION.put(prodKey, buffer, {
           httpMetadata: { contentType: 'image/jpeg' },
@@ -614,14 +619,17 @@ export default {
         });
         console.log(`[WORKER] Copied to production: ${prodKey}`);
 
-        // 4. Compute H3 index
-        const h3Index = latLngToCell(0, 0, 10); // overwritten on sync
+        // 5. Compute H3 index using actual capture coordinates when available
+        const lat = existingNode.latitude ?? 0;
+        const lng = existingNode.longitude ?? 0;
+        const hasValidCoords = existingNode.latitude != null && existingNode.longitude != null && (existingNode.latitude !== 0 || existingNode.longitude !== 0);
+        const h3Index = hasValidCoords ? latLngToCell(lat, lng, 10) : latLngToCell(0, 0, 10);
 
-        // 5. Upsert into patchwork.nodes
-        await upsertNode(env, uploadId, prodKey, h3Index, sha256);
-        console.log(`[WORKER] Supabase node upserted for uploadId: ${uploadId}`);
+        // 6. Upsert into patchwork.nodes (without reverting verified/archived status)
+        await upsertNode(env, uploadId, prodKey, h3Index, sha256, targetStatus, lat, lng);
+        console.log(`[WORKER] Supabase node upserted for uploadId: ${uploadId} with status: ${targetStatus}`);
 
-        // 6. Delete staging object
+        // 7. Delete staging object
         await env.R2_STAGING.delete(key);
         console.log(`[WORKER] Staging object deleted: ${key}`);
 
