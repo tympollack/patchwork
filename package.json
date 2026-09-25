@@ -31,6 +31,8 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1140.0",
+    "@aws-sdk/s3-request-presigner": "^3.1140.0",
     "@testing-library/react-native": "^12.9.0",
     "@types/jest": "~29.5.14",
     "@types/react": "~19.2.0",
@@ -45,10 +47,17 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint:filesize": "node scripts/lint-filesize.mjs",
-    "test": "jest"
+    "test": "jest",
+    "verify:r2": "node scripts/verify-r2-credentials.mjs",
+    "worker:test": "npm test --prefix workers/patchwork-upload-processor",
+    "worker:deploy": "npm run deploy --prefix workers/patchwork-upload-processor"
   },
   "jest": {
     "preset": "jest-expo",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/workers/"
+    ],
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
     ]
