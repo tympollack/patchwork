@@ -213,6 +213,7 @@ const presignCommand = new PutObjectCommand({
   ContentType: 'text/plain',
 });
 
+let presignSuccess = false;
 try {
   const presignedUrl = await getSignedUrl(r2, presignCommand, { expiresIn: 300 });
   console.log('  ✓ Presigner: generated presigned PUT URL successfully');
@@ -230,12 +231,18 @@ try {
     // Clean up
     await r2.send(new DeleteObjectCommand({ Bucket: STAGING_BUCKET, Key: presignKey }));
     console.log('  ✓ Cleanup: presigned test object deleted');
+    presignSuccess = true;
   } else {
     const errText = await uploadRes.text();
     console.error(`  ✗ Direct upload failed: HTTP ${uploadRes.status} — ${errText}`);
   }
 } catch (err) {
   console.error(`  ✗ Presign test failed: ${err.message}`);
+}
+
+if (!presignSuccess) {
+  console.error('\n❌ FAILED: Presigned PUT URL generation or upload test failed.');
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +307,6 @@ console.log('your Cloudflare Worker directly using the Wrangler CLI:\n');
 console.log('  cd workers/patchwork-upload-processor');
 console.log(`  echo "${ACCOUNT_ID}" | npx wrangler secret put R2_ACCOUNT_ID`);
 console.log(`  echo "${ACCESS_KEY_ID}" | npx wrangler secret put R2_ACCESS_KEY_ID`);
-console.log(`  echo "${SECRET_ACCESS_KEY}" | npx wrangler secret put R2_SECRET_ACCESS_KEY`);
+console.log('  echo "<YOUR_R2_SECRET_ACCESS_KEY>" | npx wrangler secret put R2_SECRET_ACCESS_KEY');
 console.log(`  echo "${STAGING_BUCKET}" | npx wrangler secret put R2_BUCKET_NAME`);
 console.log('\n');

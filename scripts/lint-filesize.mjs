@@ -3,10 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ROOT_DIR = process.cwd();
-// Scan both src/ (components, screens, hooks) and app/ (Expo Router / page entrypoints).
-// The `page` rule pattern matches app/**/(page|layout|loading).tsx — adding app/ here
-// ensures those files are actually checked against the page-coordinator line limit.
-const SCAN_DIRS = ['src', 'app'];
+// Scan src/, app/, scripts/, and workers/ to ensure all repository code meets modular standards.
+const SCAN_DIRS = ['src', 'app', 'scripts', 'workers'];
 
 // Grandfathered file size limits (ratchet mechanism).
 // Files here are strictly capped at their legacy size and must NOT grow larger.
@@ -30,7 +28,7 @@ const RULES = {
   },
   // Default source modules
   default: {
-    pattern: /\.(ts|tsx)$/,
+    pattern: /\.(ts|tsx|mjs|js)$/,
     maxLines: 750,
     warnLines: 400,
     label: 'Module',
@@ -48,7 +46,7 @@ function getAllFiles(dir, fileList = []) {
       if (!IGNORED_DIRS.has(entry.name)) {
         getAllFiles(fullPath, fileList);
       }
-    } else if (/\.(ts|tsx)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+    } else if (/\.(ts|tsx|mjs|js)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
       fileList.push(fullPath);
     }
   }

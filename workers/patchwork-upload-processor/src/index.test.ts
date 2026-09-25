@@ -45,6 +45,7 @@ function makeEnv(overrides: Partial<Record<string, unknown>> = {}) {
     R2_SECRET_ACCESS_KEY: 'test-secret',
     R2_BUCKET_NAME: 'patchwork-ports-stag',
     CRON_SECRET: 'test-cron-secret',
+    WEBHOOK_URL: 'https://api.patchwork.local/webhook/critter-bounty',
     ...overrides,
   };
 }
@@ -206,6 +207,101 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
     expect(body.job).toBe('archive-nodes');
     expect(body.archived).toBe(1);
   });
+
+  it('GET /api/nodes returns 400 when bounding box query parameters are missing or invalid', async () => {
+    const req = new Request('https://worker.test/api/nodes?min_lat=abc', { method: 'GET' });
+    const env = makeEnv();
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toMatch(/parameters|bounding box/i);
+  });
+
+  it('GET /api/nodes returns 200 with bounding box nodes from Supabase', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/rest/v1/nodes')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              node_id: 'node-box-1',
+              latitude: 40.7128,
+              longitude: -74.006,
+              status: 'awaiting_verification',
+              sync_status: 'synced',
+              image_key: 'ports/prod/box-1.jpg',
+              h3_index: '8a2a1072b59ffff',
+              created_at: '2026-09-25T00:00:00.000Z',
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    }));
+
+    const req = new Request('https://worker.test/api/nodes?min_lat=40.0&min_lng=-75.0&max_lat=41.0&max_lng=-73.0', { method: 'GET' });
+    const env = makeEnv();
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.nodes).toHaveLength(1);
+    expect(body.nodes[0].id).toBe('node-box-1');
+    expect(body.nodes[0].latitude).toBe(40.7128);
+  });
+
+  it('POST /api/storage/request-upload returns 200 with legacy response shape and Warning header', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'usr-123' }),
+    }));
+
+    mockGetSignedUrl.mockResolvedValue(
+      'https://patchwork-ports-stag.test-account-id.r2.cloudflarestorage.com/ports/test.jpg?X-Amz-Signature=abc'
+    );
+
+    const req = new Request('https://worker.test/api/storage/request-upload', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-jwt-token' },
+    });
+    const env = makeEnv();
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Warning')).toContain('Deprecated');
+    const body = (await res.json()) as any;
+    expect(body.upload_id).toBeDefined();
+    expect(body.object_path).toBeDefined();
+    expect(body.object_key).toBeDefined();
+  });
+
+  it('OPTIONS respects ALLOWED_ORIGINS whitelist', async () => {
+    const env = makeEnv({ ALLOWED_ORIGINS: 'https://patchwork.app,http://localhost:8081' });
+    const req = new Request('https://worker.test/api/ports/request-upload', {
+      method: 'OPTIONS',
+      headers: { Origin: 'http://localhost:8081' },
+    });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:8081');
+  });
+
+  it('POST /api/cron/bounty-trigger returns skipped message when WEBHOOK_URL is not set', async () => {
+    const req = new Request('https://worker.test/api/cron/bounty-trigger', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-cron-secret' },
+    });
+    const env = makeEnv({ WEBHOOK_URL: undefined });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.skipped).toContain('WEBHOOK_URL');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -327,31 +423,81 @@ describe('Worker Scheduled Handler (worker.scheduled)', () => {
 
   const env = makeEnv();
 
-  it('triggers bounty-trigger for cron 5 0 * * *', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => [],
-    }));
+  it('triggers bounty-trigger for cron 5 0 * * * and executes webhook & patch', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, options: any) => {
+      if (url.includes('/rest/v1/nodes') && !options?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              node_id: 'bounty-node-1',
+              latitude: 40.7128,
+              longitude: -74.006,
+              h3_index: '8a2a1072b59ffff',
+            },
+          ],
+        });
+      }
+      if (url.includes('/webhook/critter-bounty')) {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      if (url.includes('/rest/v1/nodes') && options?.method === 'PATCH') {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const ctx = { waitUntil: vi.fn((p: unknown) => p) };
+    let waitedPromise: Promise<any> | null = null;
+    const ctx = {
+      waitUntil: vi.fn((p: Promise<any>) => {
+        waitedPromise = p;
+      }),
+    };
     const event = { cron: '5 0 * * *', type: 'scheduled', scheduledTime: Date.now() };
 
     await worker.scheduled(event as any, env as any, ctx as any);
     expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+
+    const result = await waitedPromise;
+    expect(result).toEqual({ ok: true, job: 'bounty-trigger', triggered: 1, failed: 0 });
+
+    const webhookCall = fetchMock.mock.calls.find((c) => c[0].includes('/webhook/critter-bounty'));
+    expect(webhookCall).toBeDefined();
+    expect(JSON.parse(webhookCall![1].body)).toEqual({
+      node_id: 'bounty-node-1',
+      h3_index: '8a2a1072b59ffff',
+      latitude: 40.7128,
+      longitude: -74.006,
+    });
   });
 
-  it('triggers archive-nodes for cron 10 0 * * *', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => [],
-    }));
+  it('triggers archive-nodes for cron 10 0 * * * and executes patch', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/rest/v1/nodes')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{ node_id: 'archived-node-1' }],
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const ctx = { waitUntil: vi.fn((p: unknown) => p) };
+    let waitedPromise: Promise<any> | null = null;
+    const ctx = {
+      waitUntil: vi.fn((p: Promise<any>) => {
+        waitedPromise = p;
+      }),
+    };
     const event = { cron: '10 0 * * *', type: 'scheduled', scheduledTime: Date.now() };
 
     await worker.scheduled(event as any, env as any, ctx as any);
     expect(ctx.waitUntil).toHaveBeenCalledTimes(1);
+
+    const result = await waitedPromise;
+    expect(result).toEqual({ ok: true, job: 'archive-nodes', archived: 1 });
   });
 });
