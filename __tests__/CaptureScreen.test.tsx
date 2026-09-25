@@ -23,6 +23,16 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('../src/store/useSettingsStore', () => ({
   useSettingsStore: () => ({ apiBase: 'http://localhost:3000', hapticsEnabled: false, cameraQuality: 0.8 }),
 }));
+jest.mock('../src/store/useAuthStore', () => ({
+  useAuthStore: {
+    getState: () => ({
+      session: {
+        access_token: 'mock-test-jwt-token',
+        user: { id: 'mock-user-123' },
+      },
+    }),
+  },
+}));
 
 const VIEWPORT_PRESETS: ViewportPreset[] = ['compact', 'standard', 'wide'];
 

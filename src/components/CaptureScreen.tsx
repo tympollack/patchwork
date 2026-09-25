@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, Alert, TouchableOpacity, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { useAuthStore } from '../store/useAuthStore';
 
 interface CaptureResult {
   imageUri: string;
@@ -14,7 +15,11 @@ interface CaptureResult {
   uploadUrl: string | null;
 }
 
-async function requestPresignedUrl(apiBase: string): Promise<{
+async function requestPresignedUrl(
+  apiBase: string,
+  coords?: { latitude: number | null; longitude: number | null },
+  token?: string | null
+): Promise<{
   presigned_url: string;
   object_key: string;
   upload_id: string;
@@ -22,17 +27,26 @@ async function requestPresignedUrl(apiBase: string): Promise<{
   console.log(`[S3_DIAG] requesting presigned URL from ${apiBase}/api/ports/request-upload`);
   const controller = new AbortController();
   const tid = setTimeout(() => controller.abort(), 8000);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const body = JSON.stringify({
+    latitude: coords?.latitude ?? null,
+    longitude: coords?.longitude ?? null,
+  });
   const response = await fetch(`${apiBase}/api/ports/request-upload`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
+    body,
     signal: controller.signal,
   }).finally(() => clearTimeout(tid));
 
   console.log(`[S3_DIAG] presigned URL backend response: ${response.status} ${response.statusText}`);
   if (!response.ok) {
-    const body = await response.text();
-    console.error(`[S3_DIAG] presigned URL error body: ${body.slice(0, 500)}`);
-    throw new Error(`Failed to get presigned URL: ${response.status} ${body}`);
+    const errBody = await response.text();
+    console.error(`[S3_DIAG] presigned URL error body: ${errBody.slice(0, 500)}`);
+    throw new Error(`Failed to get presigned URL: ${response.status} ${errBody}`);
   }
 
   const data = await response.json();
@@ -228,7 +242,9 @@ export default function CaptureScreen() {
     startUploadTimer();
     let presigned_url: string;
     try {
-      ({ presigned_url } = await requestPresignedUrl(apiBase));
+      const session = useAuthStore.getState().session;
+      const token = session?.access_token ?? null;
+      ({ presigned_url } = await requestPresignedUrl(apiBase, { latitude, longitude }, token));
     } catch (netError) {
       const msg = netError instanceof Error ? netError.message : 'Network unavailable';
       console.error(`[S3_DIAG] handleUpload presigned URL failed: ${msg}`);

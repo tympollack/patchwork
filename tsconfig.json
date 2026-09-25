@@ -5,5 +5,9 @@
     "experimentalDecorators": true,
     "strict": true,
     "baseUrl": "."
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "workers"
+  ]
 }
