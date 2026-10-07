@@ -48,6 +48,11 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
     e.preventDefault();
     setErrorMessage(null);
 
+    if (!bufferParcelId) {
+      setErrorMessage('Verified statutory parcel standing is required. Please verify your parcel PIN.');
+      return;
+    }
+
     if (!codeSection) {
       setErrorMessage('Please select a municipal violation code section.');
       return;
@@ -77,6 +82,7 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         lng: captureResult.lng,
         azHeading: captureResult.azHeading,
         gpsPrecisionM: captureResult.precision,
+        capturedAt: new Date(captureResult.timestamp).toISOString(),
       });
 
       if (!result.success) {

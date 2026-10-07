@@ -12,6 +12,7 @@ export interface CommitAffidavitInput {
   lng?: number | null;
   azHeading?: number | null;
   gpsPrecisionM?: number | null;
+  capturedAt?: string | null;
 }
 
 export interface CommitAffidavitResult {
@@ -52,6 +53,7 @@ export async function commitAffidavit(
     lng,
     azHeading,
     gpsPrecisionM,
+    capturedAt,
   } = input;
 
   // 1. Validation guards
@@ -61,13 +63,6 @@ export async function commitAffidavit(
 
   if (!codeSection) {
     return { success: false, error: 'A statutory municipal code section must be selected.' };
-  }
-
-  if (!evidenceS3Url || !evidenceSha256) {
-    return {
-      success: false,
-      error: 'Verified sightline camera capture with SHA-256 checksum is required.',
-    };
   }
 
   const trimmedNarrative = (narrativeSummary || '').trim();
@@ -85,29 +80,41 @@ export async function commitAffidavit(
     };
   }
 
-  // 2. Standing Guard: If bufferParcelId is supplied, verify active claimant standing
-  if (bufferParcelId) {
-    const { data: parcel, error: pError } = await supabase
-      .schema('patchwork')
-      .from('buffer_parcels')
-      .select('claim_status')
-      .eq('id', bufferParcelId)
-      .maybeSingle();
+  if (!evidenceS3Url || !evidenceSha256) {
+    return {
+      success: false,
+      error: 'Verified sightline camera capture with SHA-256 checksum is required.',
+    };
+  }
 
-    if (pError || !parcel) {
-      return {
-        success: false,
-        error: 'Referenced buffer parcel could not be verified in registry.',
-      };
-    }
+  if (!bufferParcelId) {
+    return {
+      success: false,
+      error: 'Verified buffer parcel ID is required to establish statutory standing.',
+    };
+  }
 
-    if (!['active', 'verified'].includes(parcel.claim_status)) {
-      return {
-        success: false,
-        error:
-          'Claimant standing is not active. Postcard PIN verification required prior to submitting affidavits.',
-      };
-    }
+  // 2. Standing Guard: Verify active claimant standing
+  const { data: parcel, error: pError } = await supabase
+    .schema('patchwork')
+    .from('buffer_parcels')
+    .select('claim_status')
+    .eq('id', bufferParcelId)
+    .maybeSingle();
+
+  if (pError || !parcel) {
+    return {
+      success: false,
+      error: 'Referenced buffer parcel could not be verified in registry.',
+    };
+  }
+
+  if (!['active', 'verified'].includes(parcel.claim_status)) {
+    return {
+      success: false,
+      error:
+        'Claimant standing is not active. Postcard PIN verification required prior to submitting affidavits.',
+    };
   }
 
   // 3. Generate collision-resistant filing reference
@@ -119,7 +126,7 @@ export async function commitAffidavit(
     .from('impact_affidavits')
     .insert({
       zoning_node_id: zoningNodeId,
-      buffer_parcel_id: bufferParcelId || null,
+      buffer_parcel_id: bufferParcelId,
       code_section: codeSection,
       narrative_summary: trimmedNarrative,
       evidence_s3_url: evidenceS3Url,
@@ -127,6 +134,9 @@ export async function commitAffidavit(
       az_heading: azHeading !== undefined && azHeading !== null ? Number(azHeading) : null,
       gps_precision_m:
         gpsPrecisionM !== undefined && gpsPrecisionM !== null ? Number(gpsPrecisionM) : null,
+      captured_lat: lat !== undefined && lat !== null ? Number(lat) : null,
+      captured_lng: lng !== undefined && lng !== null ? Number(lng) : null,
+      captured_at: capturedAt || new Date().toISOString(),
       filing_ref: filingRef,
     })
     .select('id, filing_ref, evidence_sha256')

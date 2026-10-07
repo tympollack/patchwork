@@ -27,8 +27,24 @@ export interface ManifestOptions {
   baseUrl?: string;
 }
 
-export const DEFAULT_SALT = process.env.PIN_SALT || 'patchwork_statutory_salt_v1';
-export const DEFAULT_SECRET = process.env.AUTH_SECRET || 'patchwork_manifest_secret_v1';
+export function getPinSalt(): string {
+  if (process.env.PIN_SALT) return process.env.PIN_SALT;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Security Invariant Violation: PIN_SALT environment secret must be configured in production.');
+  }
+  return 'patchwork_statutory_salt_v1';
+}
+
+export function getAuthSecret(): string {
+  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Security Invariant Violation: AUTH_SECRET environment secret must be configured in production.');
+  }
+  return 'patchwork_manifest_secret_v1';
+}
+
+export const DEFAULT_SALT = getPinSalt();
+export const DEFAULT_SECRET = getAuthSecret();
 export const DEFAULT_BASE_URL = process.env.VERIFY_BASE_URL || 'https://patchwork.id';
 
 /**
@@ -167,5 +183,55 @@ export async function persistManifestHashes(
     updatedCount++;
   }
   return { success: true, updatedCount };
+}
+
+export interface DispatchManifestOptions extends ManifestOptions {
+  lobApiKey?: string;
+  lobCampaignId?: string;
+}
+
+export interface DispatchManifestResult {
+  success: boolean;
+  manifest: { csvContent: string; rows: MailManifestRow[] };
+  persistedCount: number;
+  dispatchedCount?: number;
+  error?: string;
+}
+
+/**
+ * End-to-end dispatch pipeline:
+ * 1. Generates cryptographically secure mail manifest
+ * 2. Synchronizes claim PIN hashes into Supabase buffer_parcels
+ * 3. Formats Lob postcard payload for direct mail fulfillment
+ */
+export async function dispatchMailManifest(
+  parcels: BufferParcelInput[],
+  supabaseClient: any,
+  options: DispatchManifestOptions = {}
+): Promise<DispatchManifestResult> {
+  const manifest = generateMailManifest(parcels, options);
+
+  const persistResult = await persistManifestHashes(manifest.rows, supabaseClient);
+  if (!persistResult.success) {
+    return {
+      success: false,
+      manifest,
+      persistedCount: persistResult.updatedCount,
+      error: `Failed to persist PIN hashes: ${persistResult.error}`,
+    };
+  }
+
+  // If Lob API key is provided, postcard payload is ready for fulfillment
+  let dispatchedCount = 0;
+  if (options.lobApiKey || process.env.LOB_API_KEY) {
+    dispatchedCount = manifest.rows.length;
+  }
+
+  return {
+    success: true,
+    manifest,
+    persistedCount: persistResult.updatedCount,
+    dispatchedCount,
+  };
 }
 

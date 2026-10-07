@@ -4,6 +4,8 @@ import {
   DEFAULT_SALT,
   DEFAULT_SECRET,
   generateAuthToken,
+  getPinSalt,
+  getAuthSecret,
 } from '../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 export interface VerifyParcelResult {
@@ -31,7 +33,7 @@ export async function verifyParcelClaim(
   plainPin: string,
   defaultZoningNodeId: string = 'swim-club-zoning-node',
   authToken?: string,
-  customSalt: string = DEFAULT_SALT
+  customSalt: string = getPinSalt()
 ): Promise<VerifyParcelResult> {
   if (!parcelPin || !plainPin) {
     return {
@@ -60,15 +62,20 @@ export async function verifyParcelClaim(
     };
   }
 
-  // 3. QR Token Verification (if provided)
+  // 3. QR Token Verification (if provided or enforced)
   if (authToken) {
-    const expectedToken = generateAuthToken(parcelPin, cleanPin, DEFAULT_SECRET);
+    const expectedToken = generateAuthToken(parcelPin, cleanPin, getAuthSecret());
     if (authToken !== expectedToken) {
       return {
         success: false,
         error: 'Invalid postcard QR authentication token. Possible forgery detected.',
       };
     }
+  } else if (process.env.ENFORCE_QR_TOKEN === 'true') {
+    return {
+      success: false,
+      error: 'Direct-mail QR authentication token is strictly required to claim parcel standing.',
+    };
   }
 
   // 4. Calculate cryptographic SHA-256 hash using synchronized salt
@@ -112,12 +119,15 @@ export async function verifyParcelClaim(
   if (!expectedHash || expectedHash !== computedHash) {
     // Record failed attempt and trigger progressive lock after 5 failures
     const attempts = (rateLimitState?.count || 0) + 1;
-    const lockedUntil = attempts >= 5 ? now + 60000 : 0; // 60-second lockout
+    const isLocked = attempts >= 5;
+    const lockedUntil = isLocked ? now + 60000 : 0; // 60-second lockout
     failedAttemptsMap.set(parcelPin, { count: attempts, lockedUntil });
 
     return {
       success: false,
-      error: 'Cryptographic hash mismatch. Unauthorized filing compromises evidentiary chain of custody.',
+      error: isLocked
+        ? 'Maximum verification attempts exceeded (5/5). Rate limit engaged. Try again in 60 seconds.'
+        : `Cryptographic hash mismatch. Unauthorized filing compromises evidentiary chain of custody. (${5 - attempts} attempt${5 - attempts === 1 ? '' : 's'} remaining)`,
     };
   }
 

@@ -63,7 +63,7 @@ describe('TASK-PW-ZON-04: Zero-Install Parcel Credential Gate and 6-Box OTP Veri
 
     const res = await verifyParcelClaim('HAM-04-102-01', '999999');
     expect(res.success).toBe(false);
-    expect(res.error).toBe(
+    expect(res.error).toContain(
       'Cryptographic hash mismatch. Unauthorized filing compromises evidentiary chain of custody.'
     );
   });

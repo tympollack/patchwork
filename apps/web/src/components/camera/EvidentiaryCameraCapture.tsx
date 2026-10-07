@@ -54,6 +54,7 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
   }, []);
 
   const handleCaptureClick = () => {
+    setCapturedData(null);
     fileInputRef.current?.click();
   };
 
@@ -61,6 +62,7 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setCapturedData(null);
     setIsProcessing(true);
     setStatusText('Reading raw camera frame...');
 
@@ -149,6 +151,7 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
       setIsProcessing(false);
       onCapture(result);
     } catch (err: any) {
+      setCapturedData(null);
       setIsProcessing(false);
       const msg = err.message || 'Evidence capture failed';
       setStatusText(`Error: ${msg}`);

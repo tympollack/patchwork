@@ -38,6 +38,9 @@ export interface ImpactAffidavit {
   az_heading?: number | null;
   gps_precision_m?: number | null;
   filing_ref?: string | null;
+  captured_lat?: number | null;
+  captured_lng?: number | null;
+  captured_at?: string | null;
   created_at: string;
 }
 

@@ -22,6 +22,8 @@ export interface MunicipalBriefAffidavit {
   evidence_sha256: string;
   az_heading?: number | null;
   gps_precision_m?: number | null;
+  captured_lat?: number | null;
+  captured_lng?: number | null;
   created_at: string;
 }
 
@@ -197,6 +199,7 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
         <div style="font-size: 12px; margin-bottom: 8px;"><strong>Physical Impact:</strong> ${escapeHtml(aff.narrative_summary)}</div>
         <div style="font-size: 10px; color: #475569;" class="mono">
           <div>BEARING AZIMUTH: ${aff.az_heading ?? 'N/A'}° | PRECISION: ±${aff.gps_precision_m ?? 'N/A'}m</div>
+          ${aff.captured_lat !== undefined && aff.captured_lat !== null ? `<div>CAPTURE GPS: ${aff.captured_lat.toFixed(6)}, ${aff.captured_lng?.toFixed(6) ?? 'N/A'}</div>` : ''}
           <div>EVIDENCE S3 URI: ${escapeHtml(aff.evidence_s3_url)}</div>
           <div>TIMESTAMP: ${escapeHtml(aff.created_at)}</div>
         </div>
@@ -342,7 +345,11 @@ export function generateMunicipalZoningBriefPdf(data: MunicipalBriefData): Uint8
         `(${escapePdf(`EXHIBIT ${aff.filing_ref} [${aff.code_section}]: ${aff.narrative_summary}`)}) Tj`
       );
       exhibitsLines.push('0 -10 Td');
-      exhibitsLines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}`)}) Tj`);
+      const gpsInfo =
+        aff.captured_lat !== undefined && aff.captured_lat !== null
+          ? ` | GPS: ${aff.captured_lat.toFixed(5)},${aff.captured_lng?.toFixed(5)}`
+          : ` | Bearing: ${aff.az_heading ?? 'N/A'}deg`;
+      exhibitsLines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}${gpsInfo}`)}) Tj`);
       exhibitsLines.push('0 -12 Td');
     }
   }

@@ -57,6 +57,36 @@ export async function POST(request: Request) {
       }
     }
 
+    if (parcelPin) {
+      const { data: parcel, error: parcelErr } = await supabase
+        .schema('patchwork')
+        .from('buffer_parcels')
+        .select('id, claim_status, zoning_node_id')
+        .eq('parcel_pin', parcelPin)
+        .maybeSingle();
+
+      if (parcelErr || !parcel) {
+        return Response.json(
+          { error: 'Unauthorized: parcel PIN is not registered in the 500-ft buffer registry.' },
+          { status: 403 }
+        );
+      }
+
+      if (parcel.claim_status === 'flagged') {
+        return Response.json(
+          { error: 'Unauthorized: parcel standing is currently flagged under administrative dispute.' },
+          { status: 403 }
+        );
+      }
+
+      if (zoningNodeId && parcel.zoning_node_id && parcel.zoning_node_id !== zoningNodeId) {
+        return Response.json(
+          { error: 'Unauthorized: parcel PIN does not belong to specified zoning docket.' },
+          { status: 403 }
+        );
+      }
+    }
+
     const timestamp = Date.now();
     const cleanPin = parcelPin ? parcelPin.replace(/[^a-zA-Z0-9_-]/g, '_') : 'unlinked';
     const key = `evidence/${cleanPin}/${timestamp}_${sha256.slice(0, 16)}.jpg`;
