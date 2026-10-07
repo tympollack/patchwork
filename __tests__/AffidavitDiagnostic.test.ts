@@ -4,16 +4,28 @@ import { supabase } from '../src/lib/supabase';
 
 const mockInsert = jest.fn();
 const mockSingle = jest.fn();
+const mockMaybeSingle = jest.fn();
 
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
     schema: jest.fn().mockReturnValue({
-      from: jest.fn().mockReturnValue({
-        insert: (payload: any) => ({
-          select: jest.fn().mockReturnValue({
-            single: () => mockSingle(),
+      from: jest.fn().mockImplementation((table: string) => {
+        if (table === 'buffer_parcels') {
+          return {
+            select: jest.fn().mockReturnValue({
+              eq: jest.fn().mockReturnValue({
+                maybeSingle: () => mockMaybeSingle(),
+              }),
+            }),
+          };
+        }
+        return {
+          insert: (payload: any) => ({
+            select: jest.fn().mockReturnValue({
+              single: () => mockSingle(),
+            }),
           }),
-        }),
+        };
       }),
     }),
   },
@@ -69,12 +81,36 @@ describe('TASK-PW-ZON-06: Statutory Diagnostic Impact Affidavit Intake Funnel', 
     expect(res.error).toContain('Verified sightline camera capture with SHA-256 checksum is required');
   });
 
-  it('successfully commits affidavit and returns filing reference and SHA-256 receipt', async () => {
+  it('rejects submission if referenced parcel claimant standing is not active', async () => {
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: { claim_status: 'unclaimed' },
+      error: null,
+    });
+
+    const res = await commitAffidavit({
+      zoningNodeId: 'node-123',
+      bufferParcelId: 'parcel-unclaimed-id',
+      codeSection: '§14-A',
+      narrativeSummary: 'Unverified claimant filing.',
+      evidenceS3Url: 'https://r2.storage/pic.jpg',
+      evidenceSha256: 'abc123hash',
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Claimant standing is not active');
+  });
+
+  it('successfully commits affidavit with verified standing and returns collision-resistant reference and SHA-256 receipt', async () => {
     const sha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: { claim_status: 'verified' },
+      error: null,
+    });
+
     mockSingle.mockResolvedValueOnce({
       data: {
         id: 'affidavit-uuid-999',
-        filing_ref: '#AFF-4821',
+        filing_ref: '#AFF-7K3A-9F2B',
         evidence_sha256: sha,
       },
       error: null,
@@ -82,6 +118,7 @@ describe('TASK-PW-ZON-06: Statutory Diagnostic Impact Affidavit Intake Funnel', 
 
     const res = await commitAffidavit({
       zoningNodeId: 'node-123',
+      bufferParcelId: 'parcel-verified-id',
       codeSection: '§14-A',
       narrativeSummary: '18-foot grading encroachment observed inside buffer line.',
       evidenceS3Url: 'https://r2.storage/pic.jpg',
@@ -91,7 +128,7 @@ describe('TASK-PW-ZON-06: Statutory Diagnostic Impact Affidavit Intake Funnel', 
     });
 
     expect(res.success).toBe(true);
-    expect(res.filingRef).toMatch(/^#AFF-\d{4}$/);
+    expect(res.filingRef).toMatch(/^#AFF-[A-Z0-9]+-[A-Z0-9]+$/);
     expect(res.sha256).toBe(sha);
     expect(res.affidavitId).toBe('affidavit-uuid-999');
   });

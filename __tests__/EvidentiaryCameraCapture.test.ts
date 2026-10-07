@@ -8,6 +8,23 @@ jest.mock('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: jest.fn().mockResolvedValue('https://mock-s3-presigned-url.com/upload'),
 }));
 
+jest.mock('../src/lib/supabase', () => ({
+  supabase: {
+    schema: jest.fn().mockReturnValue({
+      from: jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            maybeSingle: jest.fn().mockResolvedValue({
+              data: { id: 'swim-club-node-1', status: 'active' },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    }),
+  },
+}));
+
 import { POST } from '../apps/web/src/app/api/evidence/presign/route';
 
 describe('TASK-PW-ZON-05: Hardware-Attested In-App Camera Sightline Capture Component', () => {

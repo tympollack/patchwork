@@ -38,6 +38,12 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
     setErrorMessage(null);
   };
 
+  const handleCaptureError = (err: string) => {
+    // Clear previous capture if a retake fails
+    setCaptureResult(null);
+    setErrorMessage(err);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -67,6 +73,8 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         narrativeSummary: narrative.trim(),
         evidenceS3Url: captureResult.s3Url,
         evidenceSha256: captureResult.sha256,
+        lat: captureResult.lat,
+        lng: captureResult.lng,
         azHeading: captureResult.azHeading,
         gpsPrecisionM: captureResult.precision,
       });
@@ -96,7 +104,7 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         <div className="font-mono text-xs uppercase tracking-widest text-[#00E5FF]">
           ✓ Statutory Filing Committed & Authenticated
         </div>
-        <h2 className="mt-3 text-2xl font-bold uppercase tracking-tight text-white">
+        <h2 className="mt-3 text-2xl font-bold uppercase tracking-tight text-white font-sans">
           Affidavit Record Sealed
         </h2>
 
@@ -125,13 +133,13 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
           </div>
         </div>
 
-        <p className="mt-6 text-xs text-slate-400 max-w-md mx-auto">
+        <p className="mt-6 text-xs text-slate-400 max-w-md mx-auto font-sans">
           Your attested filing has been locked into the municipal evidentiary docket. It will appear directly inside the certified Board of Zoning Appeals legal brief.
         </p>
 
         <a
           href={`/audit/${zoningNodeId}`}
-          className="mt-6 inline-block border border-[#4A90E2] bg-transparent px-6 py-2.5 font-mono text-xs uppercase tracking-wider text-[#00E5FF] transition-all hover:bg-[#00E5FF]/10"
+          className="mt-6 inline-block border border-[#4A90E2] bg-transparent px-6 py-2.5 font-sans font-semibold text-xs uppercase tracking-wider text-[#00E5FF] transition-all hover:bg-[#00E5FF]/10"
           style={{ borderRadius: 0 }}
         >
           Return to Buffer Ledger
@@ -150,10 +158,10 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
       data-testid="affidavit-diagnostic-form"
     >
       <div>
-        <h2 className="text-xl font-bold uppercase tracking-wider text-white">
+        <h2 className="text-xl font-bold uppercase tracking-wider text-white font-sans">
           Statutory Impact Affidavit Intake
         </h2>
-        <p className="mt-1 text-xs text-[#7AA7E8]">
+        <p className="mt-1 text-xs text-[#7AA7E8] font-sans">
           Municipal Code Chapter 14 Civic Evidentiary Filing • Hamilton County BZA Docket
         </p>
       </div>
@@ -174,7 +182,7 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
           parcelPin={parcelPin}
           zoningNodeId={zoningNodeId}
           onCapture={handleCaptureComplete}
-          onError={(err) => setErrorMessage(err)}
+          onError={handleCaptureError}
         />
       </div>
 
@@ -218,11 +226,11 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         </div>
       )}
 
-      {/* 4. Submission Action */}
+      {/* 4. Submission Action with Font-Sans Button */}
       <button
         type="submit"
         disabled={!isFormValid || isSubmitting}
-        className="w-full border-2 border-[#00E5FF] bg-[#00E5FF] py-3.5 font-mono text-xs font-bold uppercase tracking-widest text-[#0A1128] shadow-[0_0_15px_rgba(0,229,255,0.3)] transition-all hover:bg-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed"
+        className="w-full border-2 border-[#00E5FF] bg-[#00E5FF] py-3.5 font-sans font-bold text-xs uppercase tracking-widest text-[#0A1128] shadow-[0_0_15px_rgba(0,229,255,0.3)] transition-all hover:bg-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed"
         style={{ borderRadius: 0 }}
       >
         {isSubmitting ? 'Sealing Cryptographic Affidavit...' : 'Submit Statutory Impact Affidavit'}

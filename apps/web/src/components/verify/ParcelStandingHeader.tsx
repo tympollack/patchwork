@@ -14,9 +14,19 @@ export const ParcelStandingHeader: React.FC<ParcelStandingHeaderProps> = ({
   calculatedDistanceFt,
   claimStatus = 'unclaimed',
 }) => {
-  const isPending = claimStatus === 'unclaimed';
-  const statusLabel = isPending ? 'Claim Pending Verification' : 'Verified Standing';
-  const statusColor = isPending ? 'text-amber-400 border-amber-500/50' : 'text-[#00E5FF] border-[#00E5FF]/50';
+  let statusLabel = 'Claim Pending Verification';
+  let statusColor = 'text-amber-400 border-amber-500/50';
+
+  if (claimStatus === 'verified') {
+    statusLabel = 'Verified Standing';
+    statusColor = 'text-emerald-400 border-emerald-500/50';
+  } else if (claimStatus === 'active') {
+    statusLabel = 'Active Standing';
+    statusColor = 'text-[#00E5FF] border-[#00E5FF]/50';
+  } else if (claimStatus === 'flagged') {
+    statusLabel = 'Disputed / Flagged Standing';
+    statusColor = 'text-rose-400 border-rose-500/50';
+  }
 
   return (
     <div

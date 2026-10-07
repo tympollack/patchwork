@@ -1,10 +1,15 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { supabase } from '../../../../../../../src/lib/supabase';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || 'dummy-account-id';
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || 'dummy-access-key';
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY || 'dummy-secret-key';
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'patchwork-ports-staging';
+const R2_PUBLIC_DOMAIN =
+  process.env.R2_PUBLIC_DOMAIN ||
+  process.env.NEXT_PUBLIC_R2_URL ||
+  'https://ports-stag.patchwork.id';
 
 const s3 = new S3Client({
   region: 'auto',
@@ -20,11 +25,36 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { sha256, contentType = 'image/jpeg', parcelPin, zoningNodeId } = body;
 
+    // 1. Check SHA-256 validity
     if (!sha256 || !/^[a-fA-F0-9]{64}$/.test(sha256)) {
       return Response.json(
         { error: 'Valid SHA-256 hexadecimal hash required for cryptographic attestation.' },
         { status: 400 }
       );
+    }
+
+    // 2. Authorization guard: verify docket exists and is active
+    if (!zoningNodeId && !parcelPin) {
+      return Response.json(
+        { error: 'Active zoning docket ID or registered parcel PIN required for evidence upload.' },
+        { status: 403 }
+      );
+    }
+
+    if (zoningNodeId) {
+      const { data: node, error: nodeErr } = await supabase
+        .schema('patchwork')
+        .from('zoning_nodes')
+        .select('id, status')
+        .eq('id', zoningNodeId)
+        .maybeSingle();
+
+      if (nodeErr || (node && node.status !== 'active')) {
+        return Response.json(
+          { error: 'Unauthorized: target zoning docket is not active for evidentiary filing.' },
+          { status: 403 }
+        );
+      }
     }
 
     const timestamp = Date.now();
@@ -48,7 +78,7 @@ export async function POST(request: Request) {
 
     // Generate presigned PUT URL valid for 15 minutes
     const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
-    const publicUrl = `https://${R2_BUCKET_NAME}.r2.cloudflarestorage.com/${key}`;
+    const publicUrl = `${R2_PUBLIC_DOMAIN}/${key}`;
 
     return Response.json({
       uploadUrl,

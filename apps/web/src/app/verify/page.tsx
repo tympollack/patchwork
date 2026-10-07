@@ -19,6 +19,7 @@ export default async function VerifyPage(props: VerifyPageProps) {
     ? await Promise.resolve(props.searchParams)
     : {};
   const parcelPin = resolvedParams.p;
+  const authToken = resolvedParams.t;
 
   if (!parcelPin) {
     return (
@@ -63,6 +64,7 @@ export default async function VerifyPage(props: VerifyPageProps) {
         <PinVerificationGate
           parcelPin={parcel.parcel_pin}
           zoningNodeId={parcel.zoning_node_id}
+          authToken={authToken}
         />
       </div>
     </main>

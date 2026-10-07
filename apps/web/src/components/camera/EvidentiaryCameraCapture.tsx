@@ -215,7 +215,7 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
               type="button"
               onClick={handleCaptureClick}
               disabled={isProcessing}
-              className="mt-2 w-full border border-[#4A90E2] bg-transparent py-2 font-mono text-xs uppercase tracking-wider text-[#00E5FF] transition-all hover:bg-[#00E5FF]/10"
+              className="mt-2 w-full border border-[#4A90E2] bg-transparent py-2 font-sans font-semibold text-xs uppercase tracking-wider text-[#00E5FF] transition-all hover:bg-[#00E5FF]/10"
               style={{ borderRadius: 0 }}
             >
               Retake Sightline Evidence
@@ -227,7 +227,7 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
               type="button"
               onClick={handleCaptureClick}
               disabled={isProcessing}
-              className="border-2 border-[#00E5FF] bg-[#00E5FF]/10 px-6 py-4 font-mono text-sm font-bold uppercase tracking-wider text-[#00E5FF] shadow-[0_0_15px_rgba(0,229,255,0.2)] transition-all hover:bg-[#00E5FF]/20 disabled:opacity-40"
+              className="border-2 border-[#00E5FF] bg-[#00E5FF]/10 px-6 py-4 font-sans text-sm font-bold uppercase tracking-wider text-[#00E5FF] shadow-[0_0_15px_rgba(0,229,255,0.2)] transition-all hover:bg-[#00E5FF]/20 disabled:opacity-40"
               style={{ borderRadius: 0 }}
             >
               {isProcessing ? 'Processing Attestation...' : '📷 Open Hardware Sightline Camera'}

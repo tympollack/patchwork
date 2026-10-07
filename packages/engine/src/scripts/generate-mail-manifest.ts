@@ -143,3 +143,29 @@ export function generateMailManifest(
     rows,
   };
 }
+
+/**
+ * Synchronize generated parcel PIN hashes into Supabase buffer_parcels table
+ */
+export async function persistManifestHashes(
+  rows: MailManifestRow[],
+  supabaseClient: any
+): Promise<{ success: boolean; updatedCount: number; error?: string }> {
+  let updatedCount = 0;
+  for (const row of rows) {
+    const { error } = await supabaseClient
+      .schema('patchwork')
+      .from('buffer_parcels')
+      .update({
+        claim_pin_hash: row.claim_pin_hash,
+      })
+      .eq('parcel_pin', row.parcel_pin);
+
+    if (error) {
+      return { success: false, updatedCount, error: error.message };
+    }
+    updatedCount++;
+  }
+  return { success: true, updatedCount };
+}
+

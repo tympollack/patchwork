@@ -7,12 +7,14 @@ import { verifyParcelClaim } from '../../actions/verifyParcel';
 export interface PinVerificationGateProps {
   parcelPin: string;
   zoningNodeId?: string;
+  authToken?: string;
   onSuccess?: (redirectUrl: string) => void;
 }
 
 export const PinVerificationGate: React.FC<PinVerificationGateProps> = ({
   parcelPin,
   zoningNodeId = 'swim-club-zoning-node',
+  authToken,
   onSuccess,
 }) => {
   const [loading, setLoading] = useState(false);
@@ -24,7 +26,12 @@ export const PinVerificationGate: React.FC<PinVerificationGateProps> = ({
     setErrorMessage(null);
 
     try {
-      const result = await verifyParcelClaim(parcelPin, completedPin, zoningNodeId);
+      const result = await verifyParcelClaim(
+        parcelPin,
+        completedPin,
+        zoningNodeId,
+        authToken
+      );
 
       if (!result.success) {
         setErrorMessage(

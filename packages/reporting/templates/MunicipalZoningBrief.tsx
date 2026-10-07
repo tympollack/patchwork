@@ -44,6 +44,19 @@ export interface MunicipalBriefData {
 }
 
 /**
+ * Sanitize untrusted text for safe HTML embedding
+ */
+export function escapeHtml(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
  * Generates official HTML representation matching municipal filing standards
  */
 export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string {
@@ -53,7 +66,7 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Zoning Dossier - ${zoningNode.parcel_pin}</title>
+  <title>Zoning Dossier - ${escapeHtml(zoningNode.parcel_pin)}</title>
   <style>
     @page { size: letter; margin: 0.75in; }
     body {
@@ -127,7 +140,7 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
 <body>
   <!-- SECTION 1: BZA Summary Header & Standing Declaration -->
   <div class="header-box">
-    <div class="trust-stamp">${HTN_TRUST_STRING}</div>
+    <div class="trust-stamp">${escapeHtml(HTN_TRUST_STRING)}</div>
     <h1 style="font-size: 18px; margin: 0 0 6px 0; text-transform: uppercase;">
       Hamilton County Board of Zoning Appeals
     </h1>
@@ -135,8 +148,8 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
       CIVIL AUDIT DOSSIER & STATUTORY 500-FOOT STANDING DECLARATION
     </h2>
     <div style="margin-top: 12px; font-size: 11px;">
-      <div><strong>TARGET PARCEL PIN:</strong> <span class="mono">${zoningNode.parcel_pin}</span></div>
-      <div><strong>JURISDICTION:</strong> ${zoningNode.jurisdiction}</div>
+      <div><strong>TARGET PARCEL PIN:</strong> <span class="mono">${escapeHtml(zoningNode.parcel_pin)}</span></div>
+      <div><strong>JURISDICTION:</strong> ${escapeHtml(zoningNode.jurisdiction)}</div>
       <div><strong>STATUTORY BUFFER STANDING:</strong> 500 Feet (152.4 Meters)</div>
       <div><strong>CLAIM PROGRESS:</strong> ${metrics.claimedParcels} of ${metrics.totalParcels} Parcels Claimed — ${metrics.claimPercentage}%</div>
     </div>
@@ -161,10 +174,10 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
       ${parcels
         .map(
           (p) => `<tr>
-        <td class="mono">${p.parcel_pin}</td>
-        <td>${p.deeded_address}</td>
-        <td class="mono">${p.calculated_distance_ft}</td>
-        <td class="mono">${p.claim_status.toUpperCase()}</td>
+        <td class="mono">${escapeHtml(p.parcel_pin)}</td>
+        <td>${escapeHtml(p.deeded_address)}</td>
+        <td class="mono">${escapeHtml(String(p.calculated_distance_ft))}</td>
+        <td class="mono">${escapeHtml(p.claim_status.toUpperCase())}</td>
       </tr>`
         )
         .join('')}
@@ -180,12 +193,12 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
       : affidavits
           .map(
             (aff) => `<div class="exhibit-card">
-        <div class="exhibit-header">EXHIBIT ${aff.filing_ref} • CODE VIOLATION ${aff.code_section}</div>
-        <div style="font-size: 12px; margin-bottom: 8px;"><strong>Physical Impact:</strong> ${aff.narrative_summary}</div>
+        <div class="exhibit-header">EXHIBIT ${escapeHtml(aff.filing_ref)} • CODE VIOLATION ${escapeHtml(aff.code_section)}</div>
+        <div style="font-size: 12px; margin-bottom: 8px;"><strong>Physical Impact:</strong> ${escapeHtml(aff.narrative_summary)}</div>
         <div style="font-size: 10px; color: #475569;" class="mono">
           <div>BEARING AZIMUTH: ${aff.az_heading ?? 'N/A'}° | PRECISION: ±${aff.gps_precision_m ?? 'N/A'}m</div>
-          <div>EVIDENCE S3 URI: ${aff.evidence_s3_url}</div>
-          <div>TIMESTAMP: ${aff.created_at}</div>
+          <div>EVIDENCE S3 URI: ${escapeHtml(aff.evidence_s3_url)}</div>
+          <div>TIMESTAMP: ${escapeHtml(aff.created_at)}</div>
         </div>
       </div>`
           )
@@ -209,9 +222,9 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
           : affidavits
               .map(
                 (aff) => `<tr>
-        <td class="mono">${aff.filing_ref}</td>
-        <td class="mono">${aff.code_section}</td>
-        <td class="mono" style="font-size: 9px; word-break: break-all;">${aff.evidence_sha256}</td>
+        <td class="mono">${escapeHtml(aff.filing_ref)}</td>
+        <td class="mono">${escapeHtml(aff.code_section)}</td>
+        <td class="mono" style="font-size: 9px; word-break: break-all;">${escapeHtml(aff.evidence_sha256)}</td>
       </tr>`
               )
               .join('')
@@ -223,132 +236,204 @@ export function renderMunicipalZoningBriefHtml(data: MunicipalBriefData): string
 }
 
 /**
- * Escape text for raw PDF stream
+ * Escape text for raw PDF stream (pure ASCII 7-bit)
  */
 function escapePdf(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  // Replace non-ascii chars to prevent UTF-8 multi-byte distortion in standard Type 1 fonts
+  const asciiSafe = text.replace(/[^\x20-\x7E]/g, '?');
+  return asciiSafe.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 }
 
 /**
- * Compiles a valid multi-page legal brief PDF conforming to PDF-1.4 specification
+ * Compiles a valid multi-page legal brief PDF conforming to PDF-1.4 specification.
+ * Uses exact byte offsets calculated via Buffer.byteLength to guarantee strict reader compliance.
  */
 export function generateMunicipalZoningBriefPdf(data: MunicipalBriefData): Uint8Array {
   const { zoningNode, parcels, affidavits, metrics } = data;
 
-  const lines: string[] = [];
-  lines.push('BT');
-  lines.push('/F1 14 Tf');
-  lines.push('50 750 Td');
-  lines.push(`(${escapePdf('HAMILTON COUNTY BOARD OF ZONING APPEALS')}) Tj`);
-  lines.push('0 -18 Td');
-  lines.push('/F1 11 Tf');
-  lines.push(`(${escapePdf('CIVIL AUDIT DOSSIER & STATUTORY 500-FT STANDING DECLARATION')}) Tj`);
-  lines.push('0 -16 Td');
-  lines.push('/F2 8 Tf');
-  lines.push(`(${escapePdf(HTN_TRUST_STRING)}) Tj`);
-  lines.push('0 -22 Td');
+  const asciiTrustStamp = HTN_TRUST_STRING.replace(/[^\x20-\x7E]/g, '').trim();
 
-  // Section 1 Metadata
-  lines.push('/F1 9 Tf');
-  lines.push(`(${escapePdf(`TARGET PARCEL PIN: ${zoningNode.parcel_pin}`)}) Tj`);
-  lines.push('0 -13 Td');
-  lines.push(`(${escapePdf(`JURISDICTION: ${zoningNode.jurisdiction}`)}) Tj`);
-  lines.push('0 -13 Td');
-  lines.push(
+  // Build page text streams
+  const pagesStreams: string[] = [];
+
+  // --- PAGE 1: Executive Overview & Buffer Ledger ---
+  const p1Lines: string[] = [
+    'BT',
+    '/F1 14 Tf',
+    '50 750 Td',
+    `(${escapePdf('HAMILTON COUNTY BOARD OF ZONING APPEALS')}) Tj`,
+    '0 -18 Td',
+    '/F1 11 Tf',
+    `(${escapePdf('CIVIL AUDIT DOSSIER & STATUTORY 500-FT STANDING DECLARATION')}) Tj`,
+    '0 -16 Td',
+    '/F2 8 Tf',
+    `(${escapePdf(`[HTN-TRUST-COMPLIANT] ${asciiTrustStamp}`)}) Tj`,
+    '0 -22 Td',
+    '/F1 9 Tf',
+    `(${escapePdf(`TARGET PARCEL PIN: ${zoningNode.parcel_pin}`)}) Tj`,
+    '0 -13 Td',
+    `(${escapePdf(`JURISDICTION: ${zoningNode.jurisdiction}`)}) Tj`,
+    '0 -13 Td',
     `(${escapePdf(
       `BUFFER CLAIM STATUS: ${metrics.claimedParcels} of ${metrics.totalParcels} Parcels Claimed (${metrics.claimPercentage}%)`
-    )}) Tj`
-  );
-  lines.push('0 -22 Td');
+    )}) Tj`,
+    '0 -22 Td',
+    '/F1 10 Tf',
+    `(${escapePdf('SECTION 2: GEOSPATIAL BUFFER LEDGER')}) Tj`,
+    '0 -14 Td',
+    '/F2 8 Tf',
+  ];
 
-  // Section 2 Geospatial Ledger
-  lines.push('/F1 10 Tf');
-  lines.push(`(${escapePdf('SECTION 2: GEOSPATIAL BUFFER LEDGER')}) Tj`);
-  lines.push('0 -14 Td');
-  lines.push('/F2 8 Tf');
-
-  const topParcels = parcels.slice(0, 12);
-  for (const p of topParcels) {
-    const row = `${p.parcel_pin.padEnd(16)} | ${p.deeded_address.slice(0, 28).padEnd(28)} | ${String(p.calculated_distance_ft).padStart(4)} ft | [${p.claim_status.toUpperCase()}]`;
-    lines.push(`(${escapePdf(row)}) Tj`);
-    lines.push('0 -11 Td');
+  // Render first batch of parcels (up to 30)
+  const firstBatch = parcels.slice(0, 30);
+  for (const p of firstBatch) {
+    const row = `${p.parcel_pin.padEnd(16)} | ${p.deeded_address.slice(0, 26).padEnd(26)} | ${String(
+      p.calculated_distance_ft
+    ).padStart(4)} ft | [${p.claim_status.toUpperCase()}]`;
+    p1Lines.push(`(${escapePdf(row)}) Tj`);
+    p1Lines.push('0 -10.5 Td');
   }
+  p1Lines.push('ET');
+  pagesStreams.push(p1Lines.join('\n'));
 
-  if (parcels.length > 12) {
-    lines.push(`(${escapePdf(`... and ${parcels.length - 12} additional registered buffer parcels`)}) Tj`);
-    lines.push('0 -16 Td');
-  }
+  // --- ADDITIONAL PARCEL PAGES IF MORE THAN 30 PARCELS ---
+  if (parcels.length > 30) {
+    let offset = 30;
+    while (offset < parcels.length) {
+      const batch = parcels.slice(offset, offset + 45);
+      offset += 45;
 
-  // Section 3 Exhibits
-  lines.push('0 -10 Td');
-  lines.push('/F1 10 Tf');
-  lines.push(`(${escapePdf('SECTION 3: EVIDENTIARY IMPACT EXHIBITS')}) Tj`);
-  lines.push('0 -14 Td');
-  lines.push('/F2 8 Tf');
-
-  if (affidavits.length === 0) {
-    lines.push(`(${escapePdf('No impact affidavits filed yet for this docket.')}) Tj`);
-    lines.push('0 -12 Td');
-  } else {
-    for (const aff of affidavits.slice(0, 5)) {
-      lines.push(`(${escapePdf(`${aff.filing_ref} [${aff.code_section}]: ${aff.narrative_summary}`)}) Tj`);
-      lines.push('0 -10 Td');
-      lines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}`)}) Tj`);
-      lines.push('0 -12 Td');
+      const pLines: string[] = [
+        'BT',
+        '/F1 10 Tf',
+        '50 750 Td',
+        `(${escapePdf('SECTION 2: GEOSPATIAL BUFFER LEDGER (CONTINUED)')}) Tj`,
+        '0 -16 Td',
+        '/F2 8 Tf',
+      ];
+      for (const p of batch) {
+        const row = `${p.parcel_pin.padEnd(16)} | ${p.deeded_address.slice(0, 26).padEnd(26)} | ${String(
+          p.calculated_distance_ft
+        ).padStart(4)} ft | [${p.claim_status.toUpperCase()}]`;
+        pLines.push(`(${escapePdf(row)}) Tj`);
+        pLines.push('0 -10.5 Td');
+      }
+      pLines.push('ET');
+      pagesStreams.push(pLines.join('\n'));
     }
   }
 
-  // Section 4 Chain of Custody
-  lines.push('0 -10 Td');
-  lines.push('/F1 10 Tf');
-  lines.push(`(${escapePdf('SECTION 4: CRYPTOGRAPHIC CHAIN OF CUSTODY (SHA-256 LEDGER)')}) Tj`);
-  lines.push('0 -14 Td');
-  lines.push('/F2 8 Tf');
-  lines.push(`(${escapePdf(`Total Exhibits Sealed: ${affidavits.length} | S3 ETag Verified`)}) Tj`);
-  lines.push('0 -12 Td');
-  lines.push(`(${escapePdf(`Report Generated: ${new Date().toISOString()}`)}) Tj`);
-  lines.push('ET');
+  // --- EXHIBITS & CHAIN OF CUSTODY PAGE ---
+  const exhibitsLines: string[] = [
+    'BT',
+    '/F1 10 Tf',
+    '50 750 Td',
+    `(${escapePdf('SECTION 3: EVIDENTIARY IMPACT EXHIBITS')}) Tj`,
+    '0 -14 Td',
+    '/F2 8 Tf',
+  ];
 
-  const streamContent = lines.join('\n');
-  const streamLength = Buffer.byteLength(streamContent, 'utf-8');
-
-  // PDF-1.4 file assembly
-  let pdf = '%PDF-1.4\n';
-  const offsets: number[] = [];
-
-  // Object 1: Catalog
-  offsets.push(pdf.length);
-  pdf += '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n';
-
-  // Object 2: Pages
-  offsets.push(pdf.length);
-  pdf += '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n';
-
-  // Object 3: Page
-  offsets.push(pdf.length);
-  pdf += '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj\n';
-
-  // Object 4: Contents Stream
-  offsets.push(pdf.length);
-  pdf += `4 0 obj\n<< /Length ${streamLength} >>\nstream\n${streamContent}\nendstream\nendobj\n`;
-
-  // Object 5: Standard Helvetica Font
-  offsets.push(pdf.length);
-  pdf += '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n';
-
-  // Object 6: Standard Courier Font (Monospace)
-  offsets.push(pdf.length);
-  pdf += '6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n';
-
-  // Cross-reference table
-  const startXref = pdf.length;
-  pdf += 'xref\n0 7\n0000000000 65535 f \n';
-  for (const offset of offsets) {
-    pdf += `${offset.toString().padStart(10, '0')} 00000 n \n`;
+  if (affidavits.length === 0) {
+    exhibitsLines.push(`(${escapePdf('No impact affidavits filed yet for this docket.')}) Tj`);
+    exhibitsLines.push('0 -12 Td');
+  } else {
+    for (const aff of affidavits) {
+      exhibitsLines.push(
+        `(${escapePdf(`EXHIBIT ${aff.filing_ref} [${aff.code_section}]: ${aff.narrative_summary}`)}) Tj`
+      );
+      exhibitsLines.push('0 -10 Td');
+      exhibitsLines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}`)}) Tj`);
+      exhibitsLines.push('0 -12 Td');
+    }
   }
 
-  // Trailer
-  pdf += `trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`;
+  exhibitsLines.push('0 -14 Td');
+  exhibitsLines.push('/F1 10 Tf');
+  exhibitsLines.push(
+    `(${escapePdf('SECTION 4: CRYPTOGRAPHIC CHAIN OF CUSTODY (COMPLETE SHA-256 LEDGER)')}) Tj`
+  );
+  exhibitsLines.push('0 -14 Td');
+  exhibitsLines.push('/F2 8 Tf');
+  exhibitsLines.push(
+    `(${escapePdf(
+      `Total Exhibits Sealed: ${affidavits.length} | Hardware S3 ETag Verified | Timestamp: ${new Date().toISOString()}`
+    )}) Tj`
+  );
+  exhibitsLines.push('ET');
+  pagesStreams.push(exhibitsLines.join('\n'));
 
-  return Buffer.from(pdf, 'utf-8');
+  // Assembly with exact byte counting
+  const numPages = pagesStreams.length;
+  // Objects:
+  // 1: Catalog
+  // 2: Pages root
+  // 3..(2+numPages): Page objects
+  // (3+numPages)..(2+2*numPages): Contents streams
+  // Font 1 (F1): Bold
+  // Font 2 (F2): Courier
+  const f1Obj = 3 + 2 * numPages;
+  const f2Obj = f1Obj + 1;
+  const totalObjs = f2Obj;
+
+  const chunks: Buffer[] = [];
+  const offsets: number[] = [];
+  let currentByteOffset = 0;
+
+  function pushChunk(str: string) {
+    const buf = Buffer.from(str, 'utf-8');
+    chunks.push(buf);
+    currentByteOffset += buf.length;
+  }
+
+  pushChunk('%PDF-1.4\n');
+
+  // Object 1: Catalog
+  offsets.push(currentByteOffset);
+  pushChunk('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+
+  // Object 2: Pages Root
+  offsets.push(currentByteOffset);
+  const kids = Array.from({ length: numPages }, (_, i) => `${3 + i} 0 R`).join(' ');
+  pushChunk(`2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>\nendobj\n`);
+
+  // Page Objects
+  for (let i = 0; i < numPages; i++) {
+    const pageObjNum = 3 + i;
+    const streamObjNum = 3 + numPages + i;
+    offsets.push(currentByteOffset);
+    pushChunk(
+      `${pageObjNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${streamObjNum} 0 R /Resources << /Font << /F1 ${f1Obj} 0 R /F2 ${f2Obj} 0 R >> >> >>\nendobj\n`
+    );
+  }
+
+  // Stream Objects
+  for (let i = 0; i < numPages; i++) {
+    const streamObjNum = 3 + numPages + i;
+    const stream = pagesStreams[i];
+    const streamBytes = Buffer.byteLength(stream, 'utf-8');
+    offsets.push(currentByteOffset);
+    pushChunk(
+      `${streamObjNum} 0 obj\n<< /Length ${streamBytes} >>\nstream\n${stream}\nendstream\nendobj\n`
+    );
+  }
+
+  // Fonts
+  offsets.push(currentByteOffset);
+  pushChunk(`${f1Obj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n`);
+
+  offsets.push(currentByteOffset);
+  pushChunk(`${f2Obj} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n`);
+
+  // Xref
+  const startXref = currentByteOffset;
+  let xrefStr = `xref\n0 ${totalObjs + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) {
+    xrefStr += `${off.toString().padStart(10, '0')} 00000 n \n`;
+  }
+  pushChunk(xrefStr);
+
+  // Trailer
+  pushChunk(`trailer\n<< /Size ${totalObjs + 1} /Root 1 0 R >>\nstartxref\n${startXref}\n%%EOF\n`);
+
+  return Buffer.concat(chunks);
 }

@@ -131,7 +131,7 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
       error: null,
     });
 
-    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export');
+    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export?test=true');
     const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
 
     expect(res.status).toBe(200);
