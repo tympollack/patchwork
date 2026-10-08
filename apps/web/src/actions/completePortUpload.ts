@@ -47,9 +47,9 @@ export async function completePortUpload(
     };
   }
 
-  const latNum = gpsLat !== undefined && gpsLat !== null && isFinite(Number(gpsLat)) ? Number(gpsLat) : null;
-  const lngNum = gpsLng !== undefined && gpsLng !== null && isFinite(Number(gpsLng)) ? Number(gpsLng) : null;
-  const headingNum = azHeading !== undefined && azHeading !== null && isFinite(Number(azHeading)) ? Number(azHeading) : null;
+  const latNum = gpsLat == null ? null : isFinite(Number(gpsLat)) ? Number(gpsLat) : null;
+  const lngNum = gpsLng == null ? null : isFinite(Number(gpsLng)) ? Number(gpsLng) : null;
+  const headingNum = azHeading == null ? null : isFinite(Number(azHeading)) ? Number(azHeading) : null;
 
   try {
     // 1. Persist immutable record into patchwork.ports
@@ -81,7 +81,7 @@ export async function completePortUpload(
     const expiresAtRed = new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString();
 
     // 3. Atomically update target node lifecycle timestamps
-    const { error: nodeError } = await supabase
+    const { data: updatedNodes, error: nodeError } = await supabase
       .schema('patchwork')
       .from('nodes')
       .update({
@@ -90,10 +90,14 @@ export async function completePortUpload(
         expires_at_red: expiresAtRed,
         updated_at: new Date(now).toISOString(),
       })
-      .eq('node_id', nodeId);
+      .eq('node_id', nodeId)
+      .select('node_id');
 
-    if (nodeError) {
-      console.error('Warning: failed to update node expiration timestamps:', nodeError.message);
+    if (nodeError || !updatedNodes || updatedNodes.length === 0) {
+      return {
+        success: false,
+        error: `Failed to update target node lifecycle timestamps: ${nodeError?.message || 'Node not found or update rejected'}`,
+      };
     }
 
     return {

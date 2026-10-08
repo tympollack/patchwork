@@ -46,7 +46,11 @@ describe('TASK-PW-FIELD-AUDIT-FORM: Environmental & Setback Audit Form Schema', 
       error: null,
     });
     mockMaybeSingle.mockResolvedValue({
-      data: { id: 'test-parcel-id', zoning_node_id: 'test-node-id' },
+      data: {
+        id: 'test-parcel-id',
+        zoning_node_id: 'test-node-id',
+        claim_status: 'verified',
+      },
       error: null,
     });
   });
@@ -143,6 +147,51 @@ describe('TASK-PW-FIELD-AUDIT-FORM: Environmental & Setback Audit Form Schema', 
     });
   });
 
+  describe('Claimant Standing & Buffer Registry Guards', () => {
+    it('rejects submission if parcel is not found in registry', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
+      });
+
+      const res = await commitVarianceAudit({
+        parcelPin: 'PIN-UNKNOWN-00',
+        setbackDistanceFt: 25,
+        bufferStatus: 'Intact',
+        drainageErosionIndex: 1,
+        observableImpact: 'No encroachment.',
+        evidenceS3Url: 'https://r2.storage/photo.jpg',
+        evidenceSha256: validHexSha256,
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('could not be verified in registry');
+    });
+
+    it('rejects submission if claimant standing is not active or verified', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          id: 'test-parcel-id',
+          claim_status: 'flagged',
+        },
+        error: null,
+      });
+
+      const res = await commitVarianceAudit({
+        parcelPin: 'PIN-100-20-01',
+        setbackDistanceFt: 25,
+        bufferStatus: 'Intact',
+        drainageErosionIndex: 1,
+        observableImpact: 'No encroachment.',
+        evidenceS3Url: 'https://r2.storage/photo.jpg',
+        evidenceSha256: validHexSha256,
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("Claimant standing is 'flagged'");
+    });
+  });
+
   describe('Form Field Boundary & Status Validation', () => {
     it('rejects empty parcel PIN', async () => {
       const res = await commitVarianceAudit({
@@ -202,24 +251,24 @@ describe('TASK-PW-FIELD-AUDIT-FORM: Environmental & Setback Audit Form Schema', 
       expect(resHigh.error).toContain('Drainage erosion index must be an integer between 1 and 5');
     });
 
-    it('rejects observable impact exceeding 240 characters', async () => {
+    it('rejects observable impact exceeding 180 characters', async () => {
       const res = await commitVarianceAudit({
         parcelPin: 'PIN-100-20-01',
         setbackDistanceFt: 25,
         bufferStatus: 'Encroached',
         drainageErosionIndex: 4,
-        observableImpact: 'X'.repeat(241),
+        observableImpact: 'X'.repeat(181),
         evidenceS3Url: 'https://r2.storage/photo.jpg',
         evidenceSha256: validHexSha256,
       });
 
       expect(res.success).toBe(false);
-      expect(res.error).toContain('exceeds statutory limit of 240 characters');
+      expect(res.error).toContain('exceeds statutory limit of 180 characters');
     });
   });
 
   describe('Database Persistence & Payload Formatting', () => {
-    it('persists structured narrative and sightline telemetry to impact_affidavits', async () => {
+    it('persists structured narrative and sightline telemetry to impact_affidavits without truncation', async () => {
       const res = await commitVarianceAudit({
         parcelPin: 'PIN-550-84-01',
         setbackDistanceFt: 38.5,
@@ -238,7 +287,7 @@ describe('TASK-PW-FIELD-AUDIT-FORM: Environmental & Setback Audit Form Schema', 
       expect(mockInsert).toHaveBeenCalledWith(
         expect.objectContaining({
           code_section: '§14-SETBACK-VARIANCE',
-          narrative_summary: expect.stringContaining('[Setback: 38.5ft | Buffer: Encroached | Erosion: 4/5]'),
+          narrative_summary: '[Setback: 38.5ft | Buffer: Encroached | Erosion: 4/5] Tree root damage and active gully erosion.',
           evidence_s3_url: 'https://r2.storage/evidence_550.jpg',
           evidence_sha256: validHexSha256,
           captured_lat: 39.0501,

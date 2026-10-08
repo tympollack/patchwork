@@ -18,9 +18,15 @@ const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 const mockSingle = jest.fn();
 const mockMaybeSingle = jest.fn();
+const mockGetUser = jest.fn();
+let mockUpdateError: any = null;
+let mockUpdateData: any = [{ node_id: 'test-node-101' }];
 
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
+    auth: {
+      getUser: (token: string) => mockGetUser(token),
+    },
     schema: jest.fn().mockReturnValue({
       from: jest.fn().mockImplementation((table: string) => {
         if (table === 'nodes') {
@@ -33,7 +39,12 @@ jest.mock('../src/lib/supabase', () => ({
             update: (payload: any) => {
               mockUpdate(payload);
               return {
-                eq: jest.fn().mockResolvedValue({ error: null }),
+                eq: jest.fn().mockReturnValue({
+                  select: jest.fn().mockResolvedValue({
+                    data: mockUpdateData,
+                    error: mockUpdateError,
+                  }),
+                }),
               };
             },
           };
@@ -61,15 +72,25 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUpdateError = null;
+    mockUpdateData = [{ node_id: 'test-node-101' }];
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: 'test-user-uuid' } },
+      error: null,
+    });
     mockMaybeSingle.mockResolvedValue({
-      data: { node_id: 'test-node-101', status: 'awaiting_verification' },
+      data: {
+        node_id: 'test-node-101',
+        status: 'awaiting_verification',
+        user_id: 'test-user-uuid',
+      },
       error: null,
     });
     mockSingle.mockResolvedValue({
       data: {
         id: 'port-record-uuid',
         node_id: 'test-node-101',
-        image_url: 'https://ports-stag.patchwork.id/evidence.jpg',
+        image_url: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
         image_hash: sampleHexSha256,
       },
       error: null,
@@ -89,11 +110,87 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
     });
   });
 
-  describe('2. Presigned PUT URL Generator & Mandated Checksum Header', () => {
-    it('rejects request with missing or malformed SHA-256', async () => {
+  describe('2. Authentication & Authorization Guards', () => {
+    it('rejects requests missing Bearer authorization header with 401', async () => {
       const req = new Request('https://test/api/ports/request-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nodeId: 'test-node-101',
+          sha256: sampleHexSha256,
+        }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toContain('missing or malformed Authorization header');
+    });
+
+    it('rejects requests when token is invalid or expired with 401', async () => {
+      mockGetUser.mockResolvedValueOnce({
+        data: { user: null },
+        error: new Error('Token expired'),
+      });
+
+      const req = new Request('https://test/api/ports/request-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer invalid-token',
+        },
+        body: JSON.stringify({
+          nodeId: 'test-node-101',
+          sha256: sampleHexSha256,
+        }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toContain('invalid or expired session token');
+    });
+
+    it('rejects caller when target node is owned by another user', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          node_id: 'test-node-101',
+          status: 'pending',
+          user_id: 'different-user-uuid',
+        },
+        error: null,
+      });
+
+      const req = new Request('https://test/api/ports/request-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
+        body: JSON.stringify({
+          nodeId: 'test-node-101',
+          sha256: sampleHexSha256,
+        }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(403);
+      expect(json.error).toContain('caller is not the owner of this node');
+    });
+  });
+
+  describe('3. Presigned PUT URL Generator & Mandated Checksum Header', () => {
+    it('rejects request with missing or malformed SHA-256', async () => {
+      const req = new Request('https://test/api/ports/request-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
         body: JSON.stringify({
           nodeId: 'test-node-101',
           sha256: 'invalid-hash',
@@ -110,7 +207,10 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
     it('rejects request without target nodeId', async () => {
       const req = new Request('https://test/api/ports/request-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
         body: JSON.stringify({
           sha256: sampleHexSha256,
         }),
@@ -126,7 +226,10 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
     it('generates presigned PUT URL and mandates x-amz-checksum-sha256 matching the hash', async () => {
       const req = new Request('https://test/api/ports/request-upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
         body: JSON.stringify({
           nodeId: 'test-node-101',
           sha256: sampleHexSha256,
@@ -138,7 +241,8 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
 
       expect(res.status).toBe(200);
       expect(json.uploadUrl).toBeDefined();
-      expect(json.publicUrl).toContain('ports-stag.patchwork.id');
+      expect(json.key).toBe('ports/test-node-101.jpg');
+      expect(json.publicUrl).toBe('https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg');
       expect(json.requiredHeaders).toBeDefined();
       expect(json.requiredHeaders['x-amz-checksum-sha256']).toBe(
         Buffer.from(sampleHexSha256, 'hex').toString('base64')
@@ -146,12 +250,12 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
     });
   });
 
-  describe('3. Upload Completion & Node Lifecycle Expiration Timestamps', () => {
+  describe('4. Upload Completion & Node Lifecycle Expiration Timestamps', () => {
     it('persists port row and updates node expiration timestamps (yellow 7d / red 14d)', async () => {
       const result = await completePortUpload({
         nodeId: 'test-node-101',
         userId: 'test-user-uuid',
-        imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101/pic.jpg',
+        imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
         imageHash: sampleHexSha256,
         gpsLat: 39.0501,
         gpsLng: -84.1915,
@@ -183,6 +287,42 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
       expect(result.receipt?.imageHash).toBe(sampleHexSha256);
       expect(result.receipt?.expiresAtYellow).toBeDefined();
       expect(result.receipt?.expiresAtRed).toBeDefined();
+    });
+
+    it('stores null instead of zero when gps coordinates are null or omitted', async () => {
+      await completePortUpload({
+        nodeId: 'test-node-101',
+        userId: 'test-user-uuid',
+        imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
+        imageHash: sampleHexSha256,
+        gpsLat: null,
+        gpsLng: null,
+        azHeading: null,
+      });
+
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          gps_lat: null,
+          gps_lng: null,
+          az_heading: null,
+        })
+      );
+    });
+
+    it('fails completion and returns error when target node update fails', async () => {
+      mockUpdateError = new Error('RLS check violated on node update');
+      mockUpdateData = [];
+
+      const result = await completePortUpload({
+        nodeId: 'test-node-101',
+        userId: 'test-user-uuid',
+        imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
+        imageHash: sampleHexSha256,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Failed to update target node lifecycle timestamps');
+      expect(result.receipt).toBeUndefined();
     });
 
     it('rejects completion with missing required fields', async () => {

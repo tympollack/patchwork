@@ -104,10 +104,10 @@ export async function commitVarianceAudit(
     };
   }
 
-  if (trimmedImpact.length > 240) {
+  if (trimmedImpact.length > 180) {
     return {
       success: false,
-      error: 'Observable impact summary exceeds statutory limit of 240 characters.',
+      error: 'Observable impact summary exceeds statutory limit of 180 characters.',
     };
   }
 
@@ -128,30 +128,52 @@ export async function commitVarianceAudit(
 
   const filingRef = generateVarianceFilingRef();
 
-  // Construct structured narrative summary incorporating all audit dimensions
-  const formattedSummary = `[Setback: ${setbackDistanceFt}ft | Buffer: ${bufferStatus} | Erosion: ${drainageErosionIndex}/5] ${trimmedImpact}`.slice(
-    0,
-    240
-  );
+  // Construct structured narrative summary incorporating all audit dimensions without truncation
+  const prefix = `[Setback: ${setbackDistanceFt}ft | Buffer: ${bufferStatus} | Erosion: ${drainageErosionIndex}/5] `;
+  const formattedSummary = `${prefix}${trimmedImpact}`;
+  if (formattedSummary.length > 240) {
+    return {
+      success: false,
+      error: `Combined narrative summary (${formattedSummary.length} chars) exceeds statutory limit of 240 characters. Please shorten observable impact statement.`,
+    };
+  }
 
   try {
     // Resolve zoning docket ID if not directly provided
     let resolvedZoningNodeId = zoningNodeId;
     let resolvedBufferParcelId = bufferParcelId;
 
-    if (!resolvedZoningNodeId || !resolvedBufferParcelId) {
-      const { data: parcelRow, error: pErr } = await supabase
-        .schema('patchwork')
-        .from('buffer_parcels')
-        .select('id, zoning_node_id')
-        .eq('parcel_pin', cleanPin)
-        .maybeSingle();
+    // 7. Standing Guard: Verify parcel standing and resolve IDs
+    const { data: parcelRow, error: pErr } = await supabase
+      .schema('patchwork')
+      .from('buffer_parcels')
+      .select('id, zoning_node_id, claim_status')
+      .eq('parcel_pin', cleanPin)
+      .maybeSingle();
 
-      if (!pErr && parcelRow) {
-        resolvedBufferParcelId = resolvedBufferParcelId || parcelRow.id;
-        resolvedZoningNodeId = resolvedZoningNodeId || parcelRow.zoning_node_id;
-      }
+    if (pErr) {
+      return {
+        success: false,
+        error: `Database error querying parcel registry: ${pErr.message}`,
+      };
     }
+
+    if (!parcelRow) {
+      return {
+        success: false,
+        error: `Referenced buffer parcel PIN ${cleanPin} could not be verified in registry.`,
+      };
+    }
+
+    if (!['active', 'verified'].includes(parcelRow.claim_status)) {
+      return {
+        success: false,
+        error: `Claimant standing is '${parcelRow.claim_status}'. Active or verified standing required prior to submitting variance affidavits.`,
+      };
+    }
+
+    resolvedBufferParcelId = resolvedBufferParcelId || parcelRow.id;
+    resolvedZoningNodeId = resolvedZoningNodeId || parcelRow.zoning_node_id;
 
     if (!resolvedZoningNodeId) {
       // Fallback: query any active zoning node or first available

@@ -20,17 +20,67 @@ const s3 = new S3Client({
   },
 });
 
+/**
+ * Authenticate incoming HTTP request using Supabase Bearer token
+ */
+async function authenticateRequest(
+  request: Request
+): Promise<{ user?: { id: string }; errorResponse?: Response }> {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return {
+      errorResponse: Response.json(
+        { error: 'Unauthorized: missing or malformed Authorization header with Bearer token.' },
+        { status: 401 }
+      ),
+    };
+  }
+
+  const token = authHeader.slice(7).trim();
+  if (!token) {
+    return {
+      errorResponse: Response.json(
+        { error: 'Unauthorized: empty Bearer token provided.' },
+        { status: 401 }
+      ),
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) {
+      return {
+        errorResponse: Response.json(
+          { error: 'Unauthorized: invalid or expired session token.' },
+          { status: 401 }
+        ),
+      };
+    }
+    return { user: { id: data.user.id } };
+  } catch {
+    return {
+      errorResponse: Response.json(
+        { error: 'Unauthorized: token verification failed.' },
+        { status: 401 }
+      ),
+    };
+  }
+}
+
 export async function POST(request: Request) {
   try {
+    const { user, errorResponse } = await authenticateRequest(request);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
 
     // Check if this is an upload completion / ledger sync request
     if (body.action === 'complete' || body.confirm === true) {
-      return handleCompleteUpload(body);
+      return handleCompleteUpload(user!, body);
     }
 
     // Default: Presigned PUT URL generation
-    return handleRequestPresignedUpload(body);
+    return handleRequestPresignedUpload(user!, body);
   } catch (err: any) {
     return Response.json(
       { error: `Upload request processing failed: ${err.message || 'Internal error'}` },
@@ -41,8 +91,11 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const { user, errorResponse } = await authenticateRequest(request);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
-    return handleCompleteUpload(body);
+    return handleCompleteUpload(user!, body);
   } catch (err: any) {
     return Response.json(
       { error: `Upload completion failed: ${err.message || 'Internal error'}` },
@@ -54,8 +107,8 @@ export async function PUT(request: Request) {
 /**
  * Handle Step 1: Presigned PUT URL generation with mandatory SHA-256 checksum header
  */
-async function handleRequestPresignedUpload(body: any) {
-  const { sha256, nodeId, userId, contentType = 'image/jpeg' } = body;
+async function handleRequestPresignedUpload(user: { id: string }, body: any) {
+  const { sha256, nodeId, contentType = 'image/jpeg' } = body;
 
   // 1. Validate SHA-256 hexadecimal hash
   if (!sha256 || !/^[a-fA-F0-9]{64}$/.test(sha256)) {
@@ -76,7 +129,7 @@ async function handleRequestPresignedUpload(body: any) {
   const { data: node, error: nodeErr } = await supabase
     .schema('patchwork')
     .from('nodes')
-    .select('node_id, status')
+    .select('node_id, status, user_id')
     .eq('node_id', nodeId)
     .maybeSingle();
 
@@ -87,16 +140,30 @@ async function handleRequestPresignedUpload(body: any) {
     );
   }
 
-  if (node && node.status === 'archived') {
+  if (!node) {
+    return Response.json(
+      { error: `Target node ${nodeId} not found.` },
+      { status: 404 }
+    );
+  }
+
+  if (node.status === 'archived') {
     return Response.json(
       { error: 'Target node is archived; evidence uploads are prohibited.' },
       { status: 403 }
     );
   }
 
-  const timestamp = Date.now();
+  if (node.user_id && node.user_id !== user.id) {
+    return Response.json(
+      { error: 'Unauthorized: caller is not the owner of this node.' },
+      { status: 403 }
+    );
+  }
+
   const cleanNodeId = String(nodeId).replace(/[^a-zA-Z0-9_-]/g, '_');
-  const key = `ports/prod/${cleanNodeId}/${timestamp}_${sha256.slice(0, 16)}.jpg`;
+  // Align staging key with upload processor worker contract: ports/<uploadId>.jpg
+  const key = `ports/${cleanNodeId}.jpg`;
 
   // Base64 encoding mandated by S3 ChecksumSHA256 parameter
   const hashBase64 = Buffer.from(sha256, 'hex').toString('base64');
@@ -109,13 +176,13 @@ async function handleRequestPresignedUpload(body: any) {
     Metadata: {
       'x-amz-meta-sha256': sha256,
       'x-amz-meta-node-id': cleanNodeId,
-      ...(userId ? { 'x-amz-meta-user-id': String(userId) } : {}),
+      'x-amz-meta-user-id': user.id,
     },
   });
 
   // URL valid for 15 minutes
   const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
-  const publicUrl = `${R2_PUBLIC_DOMAIN}/${key}`;
+  const publicUrl = `${R2_PUBLIC_DOMAIN}/ports/prod/${cleanNodeId}.jpg`;
 
   return Response.json({
     uploadUrl,
@@ -132,10 +199,9 @@ async function handleRequestPresignedUpload(body: any) {
 /**
  * Handle Step 2: Atomic Ledger Persistence & Node Expiration Lifecycle Update
  */
-async function handleCompleteUpload(body: any) {
+async function handleCompleteUpload(user: { id: string }, body: any) {
   const {
     nodeId,
-    userId,
     imageUrl,
     imageHash,
     gpsLat,
@@ -157,9 +223,31 @@ async function handleCompleteUpload(body: any) {
     );
   }
 
-  const latNum = isFinite(Number(gpsLat)) ? Number(gpsLat) : null;
-  const lngNum = isFinite(Number(gpsLng)) ? Number(gpsLng) : null;
-  const headingNum = isFinite(Number(azHeading)) ? Number(azHeading) : null;
+  // Verify caller owns node
+  const { data: node, error: nodeCheckErr } = await supabase
+    .schema('patchwork')
+    .from('nodes')
+    .select('node_id, status, user_id')
+    .eq('node_id', nodeId)
+    .maybeSingle();
+
+  if (nodeCheckErr || !node) {
+    return Response.json(
+      { error: `Target node not found: ${nodeCheckErr?.message || 'Node does not exist'}` },
+      { status: 404 }
+    );
+  }
+
+  if (node.user_id && node.user_id !== user.id) {
+    return Response.json(
+      { error: 'Unauthorized: caller is not the owner of this node.' },
+      { status: 403 }
+    );
+  }
+
+  const latNum = gpsLat == null ? null : isFinite(Number(gpsLat)) ? Number(gpsLat) : null;
+  const lngNum = gpsLng == null ? null : isFinite(Number(gpsLng)) ? Number(gpsLng) : null;
+  const headingNum = azHeading == null ? null : isFinite(Number(azHeading)) ? Number(azHeading) : null;
 
   // 1. Persist immutable evidence row to patchwork.ports
   const { data: portRow, error: portError } = await supabase
@@ -167,7 +255,7 @@ async function handleCompleteUpload(body: any) {
     .from('ports')
     .insert({
       node_id: nodeId,
-      user_id: userId || null,
+      user_id: user.id,
       image_url: imageUrl,
       image_hash: imageHash,
       gps_lat: latNum,
@@ -190,7 +278,7 @@ async function handleCompleteUpload(body: any) {
   const expiresAtRed = new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString();
 
   // 3. Atomically update target node lifecycle timestamps
-  const { error: nodeError } = await supabase
+  const { data: updatedNodes, error: nodeError } = await supabase
     .schema('patchwork')
     .from('nodes')
     .update({
@@ -199,10 +287,14 @@ async function handleCompleteUpload(body: any) {
       expires_at_red: expiresAtRed,
       updated_at: new Date(now).toISOString(),
     })
-    .eq('node_id', nodeId);
+    .eq('node_id', nodeId)
+    .select('node_id');
 
-  if (nodeError) {
-    console.error('Warning: failed to update node expiration timestamps:', nodeError.message);
+  if (nodeError || !updatedNodes || updatedNodes.length === 0) {
+    return Response.json(
+      { error: `Failed to update target node lifecycle: ${nodeError?.message || 'Node update failed or rejected'}` },
+      { status: 500 }
+    );
   }
 
   return Response.json({

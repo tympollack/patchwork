@@ -50,7 +50,7 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<CommitVarianceAuditResult | null>(null);
 
-  const maxChars = 240;
+  const maxChars = 180;
   const remainingChars = maxChars - observableImpact.length;
 
   const handleCaptureComplete = (result: EvidentiaryCaptureResult) => {
@@ -185,12 +185,7 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
 
         <button
           type="button"
-          onClick={() => {
-            setConfirmation(null);
-            setSetbackDistance('');
-            setObservableImpact('');
-            setCaptureResult(null);
-          }}
+          onClick={() => { setConfirmation(null); setSetbackDistance(''); setObservableImpact(''); setCaptureResult(null); }}
           className="mt-6 inline-block border border-[#4A90E2] bg-transparent px-6 py-2.5 font-sans font-semibold text-xs uppercase tracking-wider text-[#00E5FF] transition-all hover:bg-[#00E5FF]/10 cursor-pointer"
           style={{ borderRadius: 0 }}
         >
@@ -228,7 +223,10 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
           id="parcel-pin-input"
           type="text"
           value={parcelPin}
-          onChange={(e) => setParcelPin(e.target.value.toUpperCase())}
+          onChange={(e) => {
+            setParcelPin(e.target.value.toUpperCase());
+            setCaptureResult(null);
+          }}
           placeholder="e.g. PIN-550-84-01"
           disabled={isSubmitting}
           className="w-full border border-[#4A90E2] bg-[#0B132B] p-3 font-mono text-sm text-slate-100 placeholder:text-slate-600 outline-none focus:border-[#00E5FF] focus:shadow-[0_0_10px_rgba(0,229,255,0.2)]"
