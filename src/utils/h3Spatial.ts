@@ -55,7 +55,8 @@ export function calculateDensityTier(count: number): H3DensityTier {
  */
 export function getHexagonStyle(
   count: number,
-  dominantStatus: string = 'pending'
+  dominantStatus: string = 'pending',
+  highlightColor?: string
 ): H3HexagonCell['style'] {
   // Flagged / denied reports receive muted red warning outline and fill
   if (dominantStatus === 'denied') {
@@ -69,13 +70,13 @@ export function getHexagonStyle(
   }
 
   // Tech-Blueprint aesthetic:
-  // Low density (1 node): Translucent Cyan with crisp Cornflower Blue border
+  // Low density (1 node): Translucent Cyan with crisp Cornflower Blue border (or custom highlight)
   // Medium density (2-4 nodes): Electric Cyan fill with Bright Cyan border
   // High density (5-9 nodes): Bright Cyan glow
   // Critical density (10+ nodes): Intense Indigo-Cyan highlight
   if (count <= 1) {
     return {
-      color: '#6495ED',
+      color: highlightColor || '#6495ED',
       weight: 1.5,
       opacity: 0.85,
       fillColor: '#00FFFF',
@@ -85,7 +86,7 @@ export function getHexagonStyle(
 
   if (count <= 4) {
     return {
-      color: '#00FFFF',
+      color: highlightColor || '#00FFFF',
       weight: 1.5,
       opacity: 0.9,
       fillColor: '#00E5FF',
@@ -95,7 +96,7 @@ export function getHexagonStyle(
 
   if (count <= 9) {
     return {
-      color: '#00FFFF',
+      color: highlightColor || '#00FFFF',
       weight: 2,
       opacity: 0.95,
       fillColor: '#38BDF8',
@@ -105,7 +106,7 @@ export function getHexagonStyle(
 
   // Critical (10+)
   return {
-    color: '#00FFFF',
+    color: highlightColor || '#00FFFF',
     weight: 2.5,
     opacity: 1.0,
     fillColor: '#818CF8',
@@ -181,7 +182,7 @@ export function aggregateNodesToH3Hexagons(
       }
     }
 
-    const style = getHexagonStyle(count, dominantStatus);
+    const style = getHexagonStyle(count, dominantStatus, options.highlightColor);
 
     hexagons.push({
       h3Index,

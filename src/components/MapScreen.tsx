@@ -29,12 +29,24 @@ export default function MapScreen() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [selectedNode, setSelectedNode] = useState<TrustNodeData | null>(null);
-  const [selectedHexagon, setSelectedHexagon] = useState<H3HexagonCell | null>(null);
+  const [selectedHexIndex, setSelectedHexIndex] = useState<string | null>(null);
 
   // Compute H3 Resolution-10 Hexagonal aggregation
   const hexagons = useMemo(
     () => aggregateNodesToH3Hexagons(nodes, { resolution: 10 }),
     [nodes]
+  );
+
+  // Memoize marker representations from WatermelonDB nodes to prevent unnecessary map redraws
+  const markers = useMemo(
+    () => nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status })),
+    [nodes]
+  );
+
+  // Derive active selected hexagon from current aggregate; updates dynamically if nodes change
+  const selectedHexagon = useMemo(
+    () => (selectedHexIndex ? hexagons.find((h) => h.h3Index === selectedHexIndex) || null : null),
+    [hexagons, selectedHexIndex]
   );
   // Keep a ref to current mode so event callbacks don't capture stale closures
   const modeRef = useRef(mode);
@@ -100,14 +112,14 @@ export default function MapScreen() {
     const raw = nodes.find((n: any) => n.id === id);
     if (!raw) return;
     setSelectedNode(dbNodeToTrustData(raw));
-    setSelectedHexagon(null);
+    setSelectedHexIndex(null);
   };
 
   const handleHexagonPress = (h3Index: string) => {
     const hex = hexagons.find((h) => h.h3Index === h3Index);
     if (!hex) return;
     haptic(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedHexagon(hex);
+    setSelectedHexIndex(h3Index);
     setSelectedNode(null);
   };
 
@@ -129,7 +141,7 @@ export default function MapScreen() {
       <OSMMap
         initialLat={userLocation?.lat || mapDefaultLat}
         initialLng={userLocation?.lng || mapDefaultLng}
-        markers={nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status }))}
+        markers={markers}
         hexagons={hexagons}
         h3MaskEnabled={h3PrivacyMask}
         userLocation={userLocation}
@@ -189,7 +201,7 @@ export default function MapScreen() {
       {/* H3HexagonCard — shown when an H3 hexagonal crowd cell is tapped */}
       {selectedHexagon && (
         <View style={styles.popupWrap}>
-          <H3HexagonCard hexagon={selectedHexagon} onClose={() => setSelectedHexagon(null)} />
+          <H3HexagonCard hexagon={selectedHexagon} onClose={() => setSelectedHexIndex(null)} />
         </View>
       )}
 
@@ -349,7 +361,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 255, 255, 0.12)',
   },
   maskToggleText: {
-    fontFamily: 'monospace',
     fontSize: 10,
     color: '#6495ED',
     fontWeight: '700',

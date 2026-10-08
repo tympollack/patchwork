@@ -157,6 +157,15 @@ describe('TASK-MESH-H3-PRIVACY: H3 Hexagonal Region Masking & Crowd Density Inde
       expect(result).toHaveLength(1);
       expect(result[0].count).toBe(1);
     });
+
+    it('applies custom highlightColor when provided in options', () => {
+      const nodes = [
+        { id: 'hl-1', lat: 39.0501, lng: -84.1915, status: 'verified' },
+      ];
+      const result = aggregateNodesToH3Hexagons(nodes, { highlightColor: '#FFAA00' });
+      expect(result).toHaveLength(1);
+      expect(result[0].style.color).toBe('#FFAA00');
+    });
   });
 
   describe('useSettingsStore H3 Privacy Mask Configuration', () => {
