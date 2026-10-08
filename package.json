@@ -21,6 +21,7 @@
     "expo-location": "~55.1.10",
     "expo-sqlite": "~55.0.16",
     "expo-status-bar": "~55.0.6",
+    "h3-js": "^4.5.0",
     "react": "19.2.0",
     "react-native": "0.83.6",
     "react-native-maps": "1.7.1",
@@ -57,6 +58,9 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/workers/"
