@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect } from 'react';
+import { computeImageSha256 } from '../../lib/cryptoWatermark';
 
 export interface EvidentiaryCaptureResult {
   s3Url: string;
@@ -70,14 +71,9 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
       // 1. Read binary array buffer
       const buffer = await file.arrayBuffer();
 
-      // 2. Compute client-side SHA-256 hash using Web Crypto API
+      // 2. Compute client-side SHA-256 hash using unified Web Crypto helper
       setStatusText('Computing SHA-256 cryptographic checksum...');
-      const digestBuffer = await crypto.subtle.digest('SHA-256', buffer);
-      const hashArray = Array.from(new Uint8Array(digestBuffer));
-      const sha256Hex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-
-      // Base64 hash for S3 x-amz-checksum-sha256 header
-      const hashBase64 = btoa(String.fromCharCode(...new Uint8Array(digestBuffer)));
+      const { hex: sha256Hex, base64: hashBase64 } = await computeImageSha256(buffer);
 
       // 3. Obtain live high-precision GPS telemetry
       setStatusText('Sampling hardware GPS geolocation...');
