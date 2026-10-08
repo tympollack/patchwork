@@ -12,6 +12,7 @@ export interface AppSettings {
   mapDefaultLat: number;
   mapDefaultLng: number;
   cameraQuality: number; // 0.0 – 1.0
+  h3PrivacyMask: boolean; // Uber H3 Resolution-10 crowd density privacy masking
 }
 
 interface SettingsStore extends AppSettings {
@@ -26,6 +27,7 @@ const DEFAULTS: AppSettings = {
   mapDefaultLat: 39.0501,
   mapDefaultLng: -84.1915,
   cameraQuality: 1.0,
+  h3PrivacyMask: true,   // Enabled by default for surveyor and reporter anonymity
 };
 
 export const useSettingsStore = create<SettingsStore>()(

@@ -139,6 +139,18 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </Row>
 
+      <Row label="H3 PRIVACY MASK" sub="Resolution 10 hexagonal crowd density heatmap">
+        <Switch
+          value={settings.h3PrivacyMask}
+          onValueChange={(v) => {
+            if (v) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            settings.set({ h3PrivacyMask: v });
+          }}
+          trackColor={{ false: '#1e2a44', true: 'rgba(0,255,255,0.35)' }}
+          thumbColor={settings.h3PrivacyMask ? '#00FFFF' : '#6495ED'}
+        />
+      </Row>
+
       <Section title="DANGER ZONE" />
 
       <TouchableOpacity style={styles.resetBtn} onPress={() => settings.reset()}>

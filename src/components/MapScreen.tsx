@@ -1,5 +1,5 @@
 import { StyleSheet, View, TouchableOpacity, Text } from 'react-native';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,13 +8,17 @@ import { useSettingsStore } from '../store/useSettingsStore';
 import { seedDatabase } from '../utils/seedDatabase';
 import OSMMap from './OSMMap';
 import TrustPopupCard, { TrustNodeData } from './TrustPopupCard';
+import H3HexagonCard from './H3HexagonCard';
+import { aggregateNodesToH3Hexagons } from '../utils/h3Spatial';
+import { H3HexagonCell } from '../types/h3';
 
 
 export default function MapScreen() {
   const nodes = useNodeStore((s: any) => s.nodes);
   const addQuick = useNodeStore((s: any) => s.addQuickReport);
   const insets = useSafeAreaInsets();
-  const { hapticsEnabled, seedOnLaunch, mapDefaultLat, mapDefaultLng } = useSettingsStore();
+  const settings = useSettingsStore();
+  const { hapticsEnabled, seedOnLaunch, mapDefaultLat, mapDefaultLng, h3PrivacyMask } = settings;
   const haptic = (style: Haptics.ImpactFeedbackStyle) => {
     if (hapticsEnabled) Haptics.impactAsync(style);
   };
@@ -25,6 +29,25 @@ export default function MapScreen() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [selectedNode, setSelectedNode] = useState<TrustNodeData | null>(null);
+  const [selectedHexIndex, setSelectedHexIndex] = useState<string | null>(null);
+
+  // Compute H3 Resolution-10 Hexagonal aggregation
+  const hexagons = useMemo(
+    () => aggregateNodesToH3Hexagons(nodes, { resolution: 10 }),
+    [nodes]
+  );
+
+  // Memoize marker representations from WatermelonDB nodes to prevent unnecessary map redraws
+  const markers = useMemo(
+    () => nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status })),
+    [nodes]
+  );
+
+  // Derive active selected hexagon from current aggregate; updates dynamically if nodes change
+  const selectedHexagon = useMemo(
+    () => (selectedHexIndex ? hexagons.find((h) => h.h3Index === selectedHexIndex) || null : null),
+    [hexagons, selectedHexIndex]
+  );
   // Keep a ref to current mode so event callbacks don't capture stale closures
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -89,6 +112,15 @@ export default function MapScreen() {
     const raw = nodes.find((n: any) => n.id === id);
     if (!raw) return;
     setSelectedNode(dbNodeToTrustData(raw));
+    setSelectedHexIndex(null);
+  };
+
+  const handleHexagonPress = (h3Index: string) => {
+    const hex = hexagons.find((h) => h.h3Index === h3Index);
+    if (!hex) return;
+    haptic(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedHexIndex(h3Index);
+    setSelectedNode(null);
   };
 
   const confirmManual = async () => {
@@ -109,10 +141,30 @@ export default function MapScreen() {
       <OSMMap
         initialLat={userLocation?.lat || mapDefaultLat}
         initialLng={userLocation?.lng || mapDefaultLng}
-        markers={nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status }))}
+        markers={markers}
+        hexagons={hexagons}
+        h3MaskEnabled={h3PrivacyMask}
         userLocation={userLocation}
         onMarkerPress={handleMarkerPress}
+        onHexagonPress={handleHexagonPress}
       />
+
+      {/* Privacy Mask Toggle Pill (Top-Right) */}
+      <View style={[styles.maskToggleWrap, { top: insets.top + 12 }]}>
+        <TouchableOpacity
+          style={[styles.maskToggleBtn, h3PrivacyMask && styles.maskToggleBtnActive]}
+          onPress={() => {
+            haptic(Haptics.ImpactFeedbackStyle.Medium);
+            settings.set({ h3PrivacyMask: !h3PrivacyMask });
+          }}
+          activeOpacity={0.8}
+          testID="h3-privacy-toggle"
+        >
+          <Text style={[styles.maskToggleText, h3PrivacyMask && styles.maskToggleTextActive]}>
+            {h3PrivacyMask ? '⬡ H3 MASK: ON' : '📍 PINS: RAW'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Manual mode crosshair — centered, non-interactive */}
       {mode === 'manual' && (
@@ -146,8 +198,15 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* HUD action plate — hidden while a node card is open */}
-      {!selectedNode && <View style={styles.hudPlate}>
+      {/* H3HexagonCard — shown when an H3 hexagonal crowd cell is tapped */}
+      {selectedHexagon && (
+        <View style={styles.popupWrap}>
+          <H3HexagonCard hexagon={selectedHexagon} onClose={() => setSelectedHexIndex(null)} />
+        </View>
+      )}
+
+      {/* HUD action plate — hidden while a node card or hex card is open */}
+      {!selectedNode && !selectedHexagon && <View style={styles.hudPlate}>
         {mode === 'idle' ? (
           <>
             <TouchableOpacity style={styles.primaryBtn} onPress={handleQuick} activeOpacity={0.75}>
@@ -283,5 +342,31 @@ const styles = StyleSheet.create({
   },
   confirmText: {
     fontFamily: 'monospace', fontSize: 11, color: '#00FFFF', letterSpacing: 1, fontWeight: '700',
+  },
+  maskToggleWrap: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 10,
+  },
+  maskToggleBtn: {
+    backgroundColor: 'rgba(10, 17, 40, 0.92)',
+    borderWidth: 1,
+    borderColor: '#6495ED',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  maskToggleBtnActive: {
+    borderColor: '#00FFFF',
+    backgroundColor: 'rgba(0, 255, 255, 0.12)',
+  },
+  maskToggleText: {
+    fontSize: 10,
+    color: '#6495ED',
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  maskToggleTextActive: {
+    color: '#00FFFF',
   },
 });
