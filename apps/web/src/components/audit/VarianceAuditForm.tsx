@@ -1,42 +1,33 @@
 'use client';
 
 import React, { useState } from 'react';
-import {
-  EvidentiaryCameraCapture,
-  EvidentiaryCaptureResult,
-} from '../camera/EvidentiaryCameraCapture';
-import {
-  commitVarianceAudit,
-  CommitVarianceAuditResult,
-  BufferStatusType,
-} from '../../actions/commitVarianceAudit';
+import { EvidentiaryCameraCapture, EvidentiaryCaptureResult } from '../camera/EvidentiaryCameraCapture';
+import { commitVarianceAudit, CommitVarianceAuditResult, BufferStatusType } from '../../actions/commitVarianceAudit';
 
 export interface VarianceAuditFormProps {
   initialParcelPin?: string;
   zoningNodeId?: string;
   bufferParcelId?: string;
+  claimToken?: string;
+  claimPin?: string;
   onSuccess?: (result: CommitVarianceAuditResult) => void;
   className?: string;
 }
 
 const BUFFER_STATUS_OPTIONS: { value: BufferStatusType; label: string; desc: string }[] = [
-  { value: 'Intact', label: 'INTACT', desc: 'Vegetative buffer undisturbed, no grading variance' },
-  { value: 'Degraded', label: 'DEGRADED', desc: 'Canopy thinning or minor ground cover disturbance' },
-  { value: 'Encroached', label: 'ENCROACHED', desc: 'Direct clearing, vehicle ruts, or grading violation' },
+  { value: 'Intact', label: 'INTACT', desc: 'Vegetative buffer undisturbed, no grading variance' }, { value: 'Degraded', label: 'DEGRADED', desc: 'Canopy thinning or minor ground cover disturbance' }, { value: 'Encroached', label: 'ENCROACHED', desc: 'Direct clearing, vehicle ruts, or grading violation' },
 ];
 
 const EROSION_INDEX_OPTIONS = [
-  { level: 1, label: '1 - Minimal', color: 'border-cyan-500/40 text-cyan-400' },
-  { level: 2, label: '2 - Slight', color: 'border-blue-400/40 text-blue-300' },
-  { level: 3, label: '3 - Moderate', color: 'border-amber-400/40 text-amber-300' },
-  { level: 4, label: '4 - Severe', color: 'border-orange-500/50 text-orange-400' },
-  { level: 5, label: '5 - Critical', color: 'border-red-500/60 text-red-400' },
+  { level: 1, label: '1 - Minimal', color: 'border-cyan-500/40 text-cyan-400' }, { level: 2, label: '2 - Slight', color: 'border-blue-400/40 text-blue-300' }, { level: 3, label: '3 - Moderate', color: 'border-amber-400/40 text-amber-300' }, { level: 4, label: '4 - Severe', color: 'border-orange-500/50 text-orange-400' }, { level: 5, label: '5 - Critical', color: 'border-red-500/60 text-red-400' },
 ];
 
 export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
   initialParcelPin = '',
   zoningNodeId,
   bufferParcelId,
+  claimToken,
+  claimPin,
   onSuccess,
   className = '',
 }) => {
@@ -101,6 +92,25 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
 
     setIsSubmitting(true);
 
+    let effectiveClaimToken = claimToken;
+    let effectiveClaimPin = claimPin;
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const targetPin = parcelPin.trim();
+      if (!effectiveClaimToken) {
+        effectiveClaimToken =
+          sp.get('claim_token') || sp.get('token') ||
+          (targetPin ? sessionStorage.getItem(`claim_token_${targetPin}`) : null) ||
+          sessionStorage.getItem('active_claim_token') || undefined;
+      }
+      if (!effectiveClaimPin) {
+        effectiveClaimPin =
+          sp.get('claim_pin') ||
+          (targetPin ? sessionStorage.getItem(`claim_pin_${targetPin}`) : null) ||
+          sessionStorage.getItem('active_claim_pin') || undefined;
+      }
+    }
+
     try {
       const result = await commitVarianceAudit({
         parcelPin: parcelPin.trim(),
@@ -117,6 +127,8 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
         azHeading: captureResult.azHeading,
         gpsPrecisionM: captureResult.precision,
         capturedAt: new Date(captureResult.timestamp).toISOString(),
+        claimToken: effectiveClaimToken,
+        claimPin: effectiveClaimPin,
       });
 
       if (!result.success) {
@@ -150,31 +162,14 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
 
         <div className="mx-auto mt-6 max-w-lg space-y-4 text-left font-mono text-xs">
           <div className="border border-[#4A90E2]/40 bg-[#0B132B] p-4 space-y-2">
-            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2">
-              <span className="text-slate-400">FILING REF:</span>
-              <span className="font-bold text-[#00E5FF] text-sm">{confirmation.filingRef}</span>
-            </div>
-            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2">
-              <span className="text-slate-400">PARCEL PIN:</span>
-              <span className="text-white font-bold">{parcelPin}</span>
-            </div>
-            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2">
-              <span className="text-slate-400">OBSERVED SETBACK:</span>
-              <span className="text-cyan-300 font-bold">{setbackDistance} FT</span>
-            </div>
-            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2">
-              <span className="text-slate-400">BUFFER STATUS:</span>
-              <span className="text-white uppercase font-bold">{bufferStatus}</span>
-            </div>
-            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2">
-              <span className="text-slate-400">EROSION INDEX:</span>
-              <span className="text-amber-400 font-bold">{drainageErosionIndex} / 5</span>
-            </div>
+            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2"><span className="text-slate-400">FILING REF:</span><span className="font-bold text-[#00E5FF] text-sm">{confirmation.filingRef}</span></div>
+            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2"><span className="text-slate-400">PARCEL PIN:</span><span className="text-white font-bold">{parcelPin}</span></div>
+            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2"><span className="text-slate-400">OBSERVED SETBACK:</span><span className="text-cyan-300 font-bold">{setbackDistance} FT</span></div>
+            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2"><span className="text-slate-400">BUFFER STATUS:</span><span className="text-white uppercase font-bold">{bufferStatus}</span></div>
+            <div className="flex justify-between border-b border-[#4A90E2]/30 pb-2"><span className="text-slate-400">EROSION INDEX:</span><span className="text-amber-400 font-bold">{drainageErosionIndex} / 5</span></div>
             <div className="pt-1">
               <span className="text-slate-400 block mb-1">PERMANENT SHA-256 CHECKSUM:</span>
-              <span className="break-all text-[11px] text-[#00E5FF] block bg-black/40 p-2">
-                {confirmation.sha256}
-              </span>
+              <span className="break-all text-[11px] text-[#00E5FF] block bg-black/40 p-2">{confirmation.sha256}</span>
             </div>
           </div>
         </div>
@@ -338,6 +333,8 @@ export const VarianceAuditForm: React.FC<VarianceAuditFormProps> = ({
         <EvidentiaryCameraCapture
           parcelPin={parcelPin}
           zoningNodeId={zoningNodeId}
+          claimToken={claimToken}
+          claimPin={claimPin}
           onCapture={handleCaptureComplete}
           onError={handleCaptureError}
         />

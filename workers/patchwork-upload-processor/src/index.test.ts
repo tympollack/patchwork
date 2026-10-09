@@ -46,6 +46,7 @@ function makeEnv(overrides: Partial<Record<string, unknown>> = {}) {
     R2_BUCKET_NAME: 'patchwork-ports-stag',
     CRON_SECRET: 'test-cron-secret',
     WEBHOOK_URL: 'https://api.patchwork.org/webhook/critter-bounty',
+    ALLOWED_ORIGINS: '*',
     ...overrides,
   };
 }
@@ -297,6 +298,51 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
     expect(body.nodes[0].latitude).toBe(40.7128);
   });
 
+  it('POST /api/nodes returns 400 when coordinates are missing or non-numeric', async () => {
+    const req = new Request('https://worker.test/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ node_id: 'bad-coord-node' }),
+    });
+    const env = makeEnv();
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.error).toContain('Valid latitude and longitude');
+  });
+
+  it('POST /api/nodes successfully persists report and returns 201', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/rest/v1/nodes')) {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: async () => [{ node_id: 'mobile-report-101' }],
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200 });
+    }));
+
+    const req = new Request('https://worker.test/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        node_id: 'mobile-report-101',
+        latitude: 39.0501,
+        longitude: -84.1915,
+        status: 'pending_sync',
+      }),
+    });
+    const env = makeEnv();
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as any;
+    expect(body.success).toBe(true);
+    expect(body.node_id).toBe('mobile-report-101');
+  });
+
   it('POST /api/storage/request-upload returns 200 with legacy response shape and Warning header', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -333,6 +379,18 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
 
     expect(res.status).toBe(204);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:8081');
+  });
+
+  it('OPTIONS restricts to safe whitelist when ALLOWED_ORIGINS is unset', async () => {
+    const env = makeEnv({ ALLOWED_ORIGINS: undefined });
+    const req = new Request('https://worker.test/api/nodes?min_lat=40.0&min_lng=-75.0&max_lat=41.0&max_lng=-73.0', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://patchwork-stag.sunshade.icu' },
+    });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://patchwork-stag.sunshade.icu');
   });
 
   it('POST /api/cron/bounty-trigger returns skipped message when WEBHOOK_URL is not set', async () => {

@@ -1,5 +1,11 @@
 import crypto from 'crypto';
 import { supabase } from '../../../../src/lib/supabase';
+import {
+  generateAuthToken,
+  generateParcelStandingToken,
+  getAuthSecret,
+  verifyPinHash,
+} from '../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 export type BufferStatusType = 'Intact' | 'Degraded' | 'Encroached';
 
@@ -18,6 +24,9 @@ export interface CommitVarianceAuditInput {
   azHeading?: number | null;
   gpsPrecisionM?: number | null;
   capturedAt?: string | null;
+  claimPin?: string | null;
+  claimToken?: string | null;
+  authToken?: string | null;
 }
 
 export interface CommitVarianceAuditResult {
@@ -147,7 +156,7 @@ export async function commitVarianceAudit(
     const { data: parcelRow, error: pErr } = await supabase
       .schema('patchwork')
       .from('buffer_parcels')
-      .select('id, zoning_node_id, claim_status')
+      .select('id, zoning_node_id, parcel_pin, claim_status, claim_pin_hash')
       .eq('parcel_pin', cleanPin)
       .maybeSingle();
 
@@ -172,8 +181,92 @@ export async function commitVarianceAudit(
       };
     }
 
-    resolvedBufferParcelId = resolvedBufferParcelId || parcelRow.id;
-    resolvedZoningNodeId = resolvedZoningNodeId || parcelRow.zoning_node_id;
+    // Comment 11 fix: Enforce that resolvedZoningNodeId is bound strictly to parcelRow.zoning_node_id.
+    // If client supplied a zoningNodeId that contradicts the parcel record, reject with mismatch error.
+    if (zoningNodeId && parcelRow.zoning_node_id && zoningNodeId !== parcelRow.zoning_node_id) {
+      return {
+        success: false,
+        error: `Target zoning docket mismatch. Buffer parcel is registered under docket ${parcelRow.zoning_node_id}, not ${zoningNodeId}.`,
+      };
+    }
+
+    if (bufferParcelId && bufferParcelId !== parcelRow.id) {
+      return {
+        success: false,
+        error: 'Buffer parcel ID mismatch with registered parcel record.',
+      };
+    }
+
+    resolvedBufferParcelId = parcelRow.id;
+    resolvedZoningNodeId = parcelRow.zoning_node_id || zoningNodeId;
+
+    // Comment 19 fix: Standing verification guard
+    let hasValidStandingProof = false;
+    const tokenToVerify = (input.authToken || input.claimToken || '').trim();
+
+    // A. Authenticated verifier session verification (Fix SEC_0002)
+    const sessionToken = tokenToVerify.startsWith('Bearer ') ? tokenToVerify.slice(7).trim() : undefined;
+    try {
+      const { data: authData, error: authErr } = await (sessionToken
+        ? supabase.auth.getUser(sessionToken)
+        : supabase.auth.getUser());
+      if (!authErr && authData?.user) {
+        const role = authData.user.app_metadata?.role || authData.user.user_metadata?.role;
+        const email = authData.user.email || '';
+        const isAuthorizedVerifier =
+          role === 'verifier' ||
+          role === 'admin' ||
+          email.endsWith('@sunshade.icu') ||
+          email.endsWith('@patchwork.id');
+        if (isAuthorizedVerifier) {
+          hasValidStandingProof = true;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // B. 6-digit claimant verification PIN
+    const cleanClaimPin = (input.claimPin || '').trim();
+    if (cleanClaimPin) {
+      if (parcelRow.claim_pin_hash && verifyPinHash(cleanClaimPin, parcelRow.claim_pin_hash)) {
+        hasValidStandingProof = true;
+      } else {
+        return {
+          success: false,
+          error: 'Invalid claimant verification PIN. Standing could not be established.',
+        };
+      }
+    }
+
+    // C. Cryptographic HMAC standing token check (Fix SEC_0001)
+    if (tokenToVerify && !tokenToVerify.startsWith('Bearer ') && parcelRow.parcel_pin) {
+      const secret = getAuthSecret();
+      const expectedStandingToken = generateParcelStandingToken(parcelRow.parcel_pin, parcelRow.id, secret);
+      const expectedAuthToken = cleanClaimPin
+        ? generateAuthToken(parcelRow.parcel_pin, cleanClaimPin, secret)
+        : null;
+
+      if (tokenToVerify === expectedStandingToken || (expectedAuthToken && tokenToVerify === expectedAuthToken)) {
+        hasValidStandingProof = true;
+      } else {
+        return {
+          success: false,
+          error: 'Invalid claimant authentication token. Possible forgery or unauthorized token.',
+        };
+      }
+    }
+
+    const enforceStandingProof =
+      process.env.ENFORCE_STANDING_PROOF === 'true' ||
+      (process.env.NODE_ENV === 'production' && process.env.BYPASS_STANDING_CHECK !== 'true');
+
+    if (enforceStandingProof && !hasValidStandingProof) {
+      return {
+        success: false,
+        error: 'Evidentiary standing verification failed. Claimant PIN, postcard auth token, or active verified session required to file variance audits.',
+      };
+    }
 
     if (!resolvedZoningNodeId) {
       // Fallback: query any active zoning node or first available

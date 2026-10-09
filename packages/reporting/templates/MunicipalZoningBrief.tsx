@@ -326,48 +326,82 @@ export function generateMunicipalZoningBriefPdf(data: MunicipalBriefData): Uint8
     }
   }
 
-  // --- EXHIBITS & CHAIN OF CUSTODY PAGE ---
-  const exhibitsLines: string[] = [
-    'BT',
-    '/F1 10 Tf',
-    '50 750 Td',
-    `(${escapePdf('SECTION 3: EVIDENTIARY IMPACT EXHIBITS')}) Tj`,
-    '0 -14 Td',
-    '/F2 8 Tf',
-  ];
-
+  // --- EXHIBITS & CHAIN OF CUSTODY PAGES ---
+  const EXHIBITS_PER_PAGE = 15;
   if (affidavits.length === 0) {
-    exhibitsLines.push(`(${escapePdf('No impact affidavits filed yet for this docket.')}) Tj`);
-    exhibitsLines.push('0 -12 Td');
+    const exhibitsLines: string[] = [
+      'BT',
+      '/F1 10 Tf',
+      '50 750 Td',
+      `(${escapePdf('SECTION 3: EVIDENTIARY IMPACT EXHIBITS')}) Tj`,
+      '0 -14 Td',
+      '/F2 8 Tf',
+      `(${escapePdf('No impact affidavits filed yet for this docket.')}) Tj`,
+      '0 -12 Td',
+      '0 -14 Td',
+      '/F1 10 Tf',
+      `(${escapePdf('SECTION 4: CRYPTOGRAPHIC CHAIN OF CUSTODY (COMPLETE SHA-256 LEDGER)')}) Tj`,
+      '0 -14 Td',
+      '/F2 8 Tf',
+      `(${escapePdf(
+        `Total Exhibits Sealed: 0 | Hardware S3 ETag Verified | Timestamp: ${new Date().toISOString()}`
+      )}) Tj`,
+      'ET',
+    ];
+    pagesStreams.push(exhibitsLines.join('\n'));
   } else {
-    for (const aff of affidavits) {
-      exhibitsLines.push(
-        `(${escapePdf(`EXHIBIT ${aff.filing_ref} [${aff.code_section}]: ${aff.narrative_summary}`)}) Tj`
-      );
-      exhibitsLines.push('0 -10 Td');
-      const gpsInfo =
-        aff.captured_lat !== undefined && aff.captured_lat !== null
-          ? ` | GPS: ${aff.captured_lat.toFixed(5)},${aff.captured_lng?.toFixed(5)}`
-          : ` | Bearing: ${aff.az_heading ?? 'N/A'}deg`;
-      exhibitsLines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}${gpsInfo}`)}) Tj`);
-      exhibitsLines.push('0 -12 Td');
+    let offset = 0;
+    while (offset < affidavits.length) {
+      const batch = affidavits.slice(offset, offset + EXHIBITS_PER_PAGE);
+      offset += EXHIBITS_PER_PAGE;
+      const isFirst = offset === EXHIBITS_PER_PAGE;
+      const isLast = offset >= affidavits.length;
+
+      const pageLines: string[] = [
+        'BT',
+        '/F1 10 Tf',
+        '50 750 Td',
+        `(${escapePdf(
+          isFirst
+            ? 'SECTION 3: EVIDENTIARY IMPACT EXHIBITS'
+            : 'SECTION 3: EVIDENTIARY IMPACT EXHIBITS (CONTINUED)'
+        )}) Tj`,
+        '0 -14 Td',
+        '/F2 8 Tf',
+      ];
+
+      for (const aff of batch) {
+        pageLines.push(
+          `(${escapePdf(`EXHIBIT ${aff.filing_ref} [${aff.code_section}]: ${aff.narrative_summary}`)}) Tj`
+        );
+        pageLines.push('0 -10 Td');
+        const gpsInfo =
+          aff.captured_lat !== undefined && aff.captured_lat !== null
+            ? ` | GPS: ${aff.captured_lat.toFixed(5)},${aff.captured_lng?.toFixed(5)}`
+            : ` | Bearing: ${aff.az_heading ?? 'N/A'}deg`;
+        pageLines.push(`(${escapePdf(`  SHA-256: ${aff.evidence_sha256}${gpsInfo}`)}) Tj`);
+        pageLines.push('0 -12 Td');
+      }
+
+      if (isLast) {
+        pageLines.push('0 -14 Td');
+        pageLines.push('/F1 10 Tf');
+        pageLines.push(
+          `(${escapePdf('SECTION 4: CRYPTOGRAPHIC CHAIN OF CUSTODY (COMPLETE SHA-256 LEDGER)')}) Tj`
+        );
+        pageLines.push('0 -14 Td');
+        pageLines.push('/F2 8 Tf');
+        pageLines.push(
+          `(${escapePdf(
+            `Total Exhibits Sealed: ${affidavits.length} | Hardware S3 ETag Verified | Timestamp: ${new Date().toISOString()}`
+          )}) Tj`
+        );
+      }
+
+      pageLines.push('ET');
+      pagesStreams.push(pageLines.join('\n'));
     }
   }
-
-  exhibitsLines.push('0 -14 Td');
-  exhibitsLines.push('/F1 10 Tf');
-  exhibitsLines.push(
-    `(${escapePdf('SECTION 4: CRYPTOGRAPHIC CHAIN OF CUSTODY (COMPLETE SHA-256 LEDGER)')}) Tj`
-  );
-  exhibitsLines.push('0 -14 Td');
-  exhibitsLines.push('/F2 8 Tf');
-  exhibitsLines.push(
-    `(${escapePdf(
-      `Total Exhibits Sealed: ${affidavits.length} | Hardware S3 ETag Verified | Timestamp: ${new Date().toISOString()}`
-    )}) Tj`
-  );
-  exhibitsLines.push('ET');
-  pagesStreams.push(exhibitsLines.join('\n'));
 
   // Assembly with exact byte counting
   const numPages = pagesStreams.length;

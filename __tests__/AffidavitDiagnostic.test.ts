@@ -132,4 +132,81 @@ describe('TASK-PW-ZON-06: Statutory Diagnostic Impact Affidavit Intake Funnel', 
     expect(res.sha256).toBe(sha);
     expect(res.affidavitId).toBe('affidavit-uuid-999');
   });
+
+  it('rejects submission if buffer parcel is registered under a different zoning docket', async () => {
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: {
+        id: 'parcel-verified-id',
+        zoning_node_id: 'different-node-999',
+        claim_status: 'verified',
+      },
+      error: null,
+    });
+
+    const res = await commitAffidavit({
+      zoningNodeId: 'node-123',
+      bufferParcelId: 'parcel-verified-id',
+      codeSection: '§14-A',
+      narrativeSummary: 'Encroachment observed.',
+      evidenceS3Url: 'https://r2.storage/pic.jpg',
+      evidenceSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Target zoning docket mismatch');
+  });
+
+  it('rejects submission if caller provides an invalid claimant verification PIN', async () => {
+    mockMaybeSingle.mockResolvedValueOnce({
+      data: {
+        id: 'parcel-verified-id',
+        zoning_node_id: 'node-123',
+        claim_status: 'verified',
+        claim_pin_hash: 'valid-hash',
+      },
+      error: null,
+    });
+
+    const res = await commitAffidavit({
+      zoningNodeId: 'node-123',
+      bufferParcelId: 'parcel-verified-id',
+      codeSection: '§14-A',
+      narrativeSummary: 'Encroachment observed.',
+      evidenceS3Url: 'https://r2.storage/pic.jpg',
+      evidenceSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      claimPin: '000000',
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Invalid claimant verification PIN');
+  });
+
+  it('enforces standing proof when ENFORCE_STANDING_PROOF is enabled', async () => {
+    process.env.ENFORCE_STANDING_PROOF = 'true';
+    try {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          id: 'parcel-verified-id',
+          zoning_node_id: 'node-123',
+          claim_status: 'verified',
+          claim_pin_hash: 'valid-hash',
+        },
+        error: null,
+      });
+
+      const res = await commitAffidavit({
+        zoningNodeId: 'node-123',
+        bufferParcelId: 'parcel-verified-id',
+        codeSection: '§14-A',
+        narrativeSummary: 'Encroachment observed.',
+        evidenceS3Url: 'https://r2.storage/pic.jpg',
+        evidenceSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Evidentiary standing verification failed');
+    } finally {
+      delete process.env.ENFORCE_STANDING_PROOF;
+    }
+  });
 });

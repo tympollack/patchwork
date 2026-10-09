@@ -1,8 +1,10 @@
+import crypto from 'crypto';
 import { supabase } from '../../../../../../../../src/lib/supabase';
 import {
   generateMunicipalZoningBriefPdf,
   MunicipalBriefData,
 } from '../../../../../../../../packages/reporting/templates/MunicipalZoningBrief';
+import { getAuthSecret } from '../../../../../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 interface RouteContext {
   params: Promise<{ node_id: string }> | { node_id: string };
@@ -17,16 +19,87 @@ export async function GET(request: Request, context: RouteContext) {
       return Response.json({ error: 'Node ID required for export.' }, { status: 400 });
     }
 
-    // 1. Authorization guard: require authorized session or audit access token
+    // 1. Authorization guard: require authenticated verifier session or cryptographic standing token
     const url = new URL(request.url);
     const authToken =
       request.headers.get('Authorization') ||
       request.headers.get('x-audit-token') ||
       url.searchParams.get('token');
 
-    // Allow in test environment or when authorization token/session is present
-    const isTestEnv = process.env.NODE_ENV === 'test' || url.searchParams.get('test') === 'true';
-    if (!authToken && !isTestEnv) {
+    let isAuthorized = false;
+
+    if (authToken) {
+      const rawToken = authToken.startsWith('Bearer ')
+        ? authToken.slice(7).trim()
+        : authToken.trim();
+
+      if (rawToken) {
+        // Validate against Supabase Auth session
+        try {
+          const { data: userData, error: userError } = await supabase.auth.getUser(rawToken);
+          if (!userError && userData?.user) {
+            const role =
+              (userData.user.app_metadata?.role as string) ||
+              (userData.user.user_metadata?.role as string) ||
+              '';
+            const email = userData.user.email || '';
+            const isAuthorizedVerifier =
+              role === 'verifier' ||
+              role === 'admin' ||
+              role === 'surveyor' ||
+              email.endsWith('@sunshade.icu') ||
+              email.endsWith('@patchwork.id');
+
+            if (isAuthorizedVerifier) {
+              isAuthorized = true;
+            } else {
+              // Scoped resident check: verify user owns a buffer parcel in this specific docket
+              const { data: userParcel } = await supabase
+                .schema('patchwork')
+                .from('buffer_parcels')
+                .select('id')
+                .eq('zoning_node_id', nodeId)
+                .eq('claimed_by_user_id', userData.user.id)
+                .maybeSingle();
+
+              if (userParcel) {
+                isAuthorized = true;
+              }
+            }
+          }
+        } catch {
+          // continue to token check
+        }
+
+        // Validate cryptographic standing token for docket
+        if (!isAuthorized) {
+          try {
+            const secret = getAuthSecret();
+            const expectedHmac = crypto.createHmac('sha256', secret).update(nodeId).digest('hex');
+            const expectedDocketStanding = crypto
+              .createHmac('sha256', secret)
+              .update(`docket:${nodeId}`)
+              .digest('hex');
+
+            if (
+              rawToken === expectedHmac ||
+              rawToken === expectedHmac.slice(0, 32) ||
+              rawToken === expectedDocketStanding ||
+              rawToken === expectedDocketStanding.slice(0, 32)
+            ) {
+              isAuthorized = true;
+            }
+          } catch (err: any) {
+            return Response.json(
+              { error: `Authentication secret configuration error: ${err.message}` },
+              { status: 500 }
+            );
+          }
+        }
+      }
+    }
+
+    if (!isAuthorized) {
       return Response.json(
         {
           error:
@@ -84,7 +157,7 @@ export async function GET(request: Request, context: RouteContext) {
       .schema('patchwork')
       .from('impact_affidavits')
       .select(
-        'filing_ref, code_section, narrative_summary, evidence_s3_url, evidence_sha256, az_heading, gps_precision_m, created_at'
+        'filing_ref, code_section, narrative_summary, evidence_s3_url, evidence_sha256, az_heading, gps_precision_m, captured_lat, captured_lng, created_at'
       )
       .eq('zoning_node_id', nodeId);
 
@@ -103,6 +176,8 @@ export async function GET(request: Request, context: RouteContext) {
       evidence_sha256: a.evidence_sha256,
       az_heading: a.az_heading ? Number(a.az_heading) : null,
       gps_precision_m: a.gps_precision_m ? Number(a.gps_precision_m) : null,
+      captured_lat: a.captured_lat ? Number(a.captured_lat) : null,
+      captured_lng: a.captured_lng ? Number(a.captured_lng) : null,
       created_at: a.created_at,
     }));
 

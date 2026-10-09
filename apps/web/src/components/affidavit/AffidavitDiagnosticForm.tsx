@@ -12,6 +12,8 @@ export interface AffidavitDiagnosticFormProps {
   zoningNodeId: string;
   bufferParcelId?: string;
   parcelPin?: string;
+  claimToken?: string;
+  claimPin?: string;
   onSuccess?: (result: CommitAffidavitResult) => void;
   className?: string;
 }
@@ -20,6 +22,8 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
   zoningNodeId,
   bufferParcelId,
   parcelPin,
+  claimToken,
+  claimPin,
   onSuccess,
   className = '',
 }) => {
@@ -70,6 +74,27 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
 
     setIsSubmitting(true);
 
+    let effectiveClaimToken = claimToken;
+    let effectiveClaimPin = claimPin;
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      if (!effectiveClaimToken) {
+        effectiveClaimToken =
+          sp.get('claim_token') ||
+          sp.get('token') ||
+          (parcelPin ? sessionStorage.getItem(`claim_token_${parcelPin}`) : null) ||
+          sessionStorage.getItem('active_claim_token') ||
+          undefined;
+      }
+      if (!effectiveClaimPin) {
+        effectiveClaimPin =
+          sp.get('claim_pin') ||
+          (parcelPin ? sessionStorage.getItem(`claim_pin_${parcelPin}`) : null) ||
+          sessionStorage.getItem('active_claim_pin') ||
+          undefined;
+      }
+    }
+
     try {
       const result = await commitAffidavit({
         zoningNodeId,
@@ -83,6 +108,8 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         azHeading: captureResult.azHeading,
         gpsPrecisionM: captureResult.precision,
         capturedAt: new Date(captureResult.timestamp).toISOString(),
+        claimToken: effectiveClaimToken,
+        claimPin: effectiveClaimPin,
       });
 
       if (!result.success) {
@@ -187,6 +214,8 @@ export const AffidavitDiagnosticForm: React.FC<AffidavitDiagnosticFormProps> = (
         <EvidentiaryCameraCapture
           parcelPin={parcelPin}
           zoningNodeId={zoningNodeId}
+          claimToken={claimToken}
+          claimPin={claimPin}
           onCapture={handleCaptureComplete}
           onError={handleCaptureError}
         />

@@ -77,15 +77,30 @@ interface R2EventMessage {
 // ---------------------------------------------------------------------------
 export function getCorsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get('origin') || '';
-  const allowed = env.ALLOWED_ORIGINS || '*';
+  const allowed = env.ALLOWED_ORIGINS;
 
-  let allowOrigin = '*';
-  if (allowed !== '*') {
+  let allowOrigin = 'null';
+  if (allowed === '*') {
+    allowOrigin = '*';
+  } else if (allowed) {
     const originsList = allowed.split(',').map((o) => o.trim().toLowerCase());
     if (origin && originsList.includes(origin.toLowerCase())) {
       allowOrigin = origin;
     } else {
       allowOrigin = originsList[0] || 'null';
+    }
+  } else {
+    // Default safe origin whitelist when ALLOWED_ORIGINS is unset
+    const defaultOrigins = [
+      'https://patchwork-stag.sunshade.icu',
+      'https://patchwork.sunshade.icu',
+      'http://localhost:3000',
+      'http://localhost:8081',
+    ];
+    if (origin && defaultOrigins.includes(origin.toLowerCase())) {
+      allowOrigin = origin;
+    } else {
+      allowOrigin = defaultOrigins[0];
     }
   }
 
@@ -195,7 +210,7 @@ async function createPendingNode(
   longitude: number
 ): Promise<void> {
   const url = `${env.SUPABASE_URL}/rest/v1/nodes?on_conflict=node_id`;
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -214,6 +229,11 @@ async function createPendingNode(
       sync_status: 'pending_sync',
     }),
   });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to create pending node in database: HTTP ${res.status} — ${errText.slice(0, 200)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,8 +309,42 @@ export default {
       );
     }
 
-    // GET /api/nodes — Bounding box query for map verifier clients
+    // /api/nodes — Bounding box query (GET) and offline report synchronization (POST)
     if (url.pathname === '/api/nodes') {
+      if (request.method === 'POST') {
+        try {
+          const body = (await request.json().catch(() => null)) as {
+            node_id?: string;
+            latitude?: number;
+            longitude?: number;
+            status?: string;
+          } | null;
+
+          if (!body || typeof body.latitude !== 'number' || typeof body.longitude !== 'number') {
+            return Response.json(
+              { error: 'Valid latitude and longitude numbers are required.' },
+              { status: 400, headers: corsHeaders }
+            );
+          }
+
+          const nodeId = body.node_id || crypto.randomUUID();
+          const authHeader = request.headers.get('Authorization');
+          const userId = authHeader?.startsWith('Bearer ') ? 'authenticated_user' : null;
+
+          await createPendingNode(env, nodeId, userId, body.latitude, body.longitude);
+
+          return Response.json(
+            { success: true, node_id: nodeId, status: 'pending' },
+            { status: 201, headers: corsHeaders }
+          );
+        } catch (err: any) {
+          return Response.json(
+            { error: `Failed to persist report: ${err.message}` },
+            { status: 500, headers: corsHeaders }
+          );
+        }
+      }
+
       if (request.method !== 'GET') {
         return Response.json({ error: 'Method not allowed' }, { status: 405, headers: corsHeaders });
       }

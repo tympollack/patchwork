@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import {
   generateMunicipalZoningBriefPdf,
   renderMunicipalZoningBriefHtml,
@@ -6,13 +7,18 @@ import {
 import { GET } from '../apps/web/src/app/api/audit/[node_id]/export/route';
 import { supabase } from '../src/lib/supabase';
 import { HTN_TRUST_STRING } from '../apps/web/src/styles/tokens';
+import { getAuthSecret } from '../packages/engine/src/scripts/generate-mail-manifest';
 
 const mockMaybeSingle = jest.fn();
 const mockEqParcels = jest.fn();
 const mockEqAffidavits = jest.fn();
+const mockGetUser = jest.fn();
 
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
+    auth: {
+      getUser: (...args: any[]) => mockGetUser(...args),
+    },
     schema: jest.fn().mockReturnValue({
       from: jest.fn().mockImplementation((table: string) => {
         if (table === 'zoning_nodes') {
@@ -27,7 +33,13 @@ jest.mock('../src/lib/supabase', () => ({
         if (table === 'buffer_parcels') {
           return {
             select: jest.fn().mockReturnValue({
-              eq: () => mockEqParcels(),
+              eq: jest.fn().mockImplementation(() => {
+                const res: any = Promise.resolve(mockEqParcels());
+                res.eq = jest.fn().mockReturnValue({
+                  maybeSingle: () => mockMaybeSingle(),
+                });
+                return res;
+              }),
             }),
           };
         }
@@ -106,6 +118,32 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
     expect(pdfString).toContain('9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08');
   });
 
+  it('paginates exhibits across multiple pages for large dossiers without clipping', () => {
+    const largeAffidavitsData: MunicipalBriefData = {
+      ...sampleData,
+      affidavits: Array.from({ length: 40 }, (_, i) => ({
+        filing_ref: `#AFF-${String(i + 1).padStart(4, '0')}`,
+        code_section: '§14-SETBACK',
+        narrative_summary: `Encroachment observation index ${i + 1}`,
+        evidence_s3_url: `https://r2.storage/exhibit-${i + 1}.jpg`,
+        evidence_sha256: `sha256-hash-${i + 1}`.padEnd(64, '0'),
+        captured_lat: 39.05 + i * 0.001,
+        captured_lng: -84.19 - i * 0.001,
+        created_at: '2026-10-01T12:00:00Z',
+      })),
+    };
+
+    const pdfBytes = generateMunicipalZoningBriefPdf(largeAffidavitsData);
+    const pdfString = Buffer.from(pdfBytes).toString('utf-8');
+
+    expect(pdfString.startsWith('%PDF-1.4')).toBe(true);
+    expect(pdfString).toContain('SECTION 3: EVIDENTIARY IMPACT EXHIBITS');
+    expect(pdfString).toContain('SECTION 3: EVIDENTIARY IMPACT EXHIBITS \\(CONTINUED\\)');
+    expect(pdfString).toContain('#AFF-0001');
+    expect(pdfString).toContain('#AFF-0040');
+    expect(pdfString).toContain('Total Exhibits Sealed: 40');
+  });
+
   it('renders complete legal brief HTML with formal sections', () => {
     const html = renderMunicipalZoningBriefHtml(sampleData);
 
@@ -117,12 +155,32 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
     expect(html).toContain('Section 4: Cryptographic Chain of Custody');
   });
 
-  it('GET export route returns application/pdf with Content-Disposition attachment header', async () => {
+  it('rejects GET export route without valid token or credentials with 401', async () => {
+    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export');
+    const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects GET export route when authenticated user is not an authorized verifier and owns no parcel', async () => {
+    mockGetUser.mockResolvedValueOnce({
+      data: { user: { id: 'regular-user', app_metadata: { role: 'resident' }, email: 'user@example.com' } },
+      error: null,
+    });
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+
+    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export', {
+      headers: { Authorization: 'Bearer regular-token' },
+    });
+    const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('GET export route returns application/pdf with Content-Disposition attachment header when given valid token', async () => {
     mockMaybeSingle.mockResolvedValueOnce({
       data: sampleData.zoningNode,
       error: null,
     });
-    mockEqParcels.mockResolvedValueOnce({
+    mockEqParcels.mockReturnValueOnce({
       data: sampleData.parcels,
       error: null,
     });
@@ -131,7 +189,9 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
       error: null,
     });
 
-    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export?test=true');
+    const secret = getAuthSecret();
+    const token = crypto.createHmac('sha256', secret).update('swim-club-node-1').digest('hex');
+    const req = new Request(`http://localhost:3000/api/audit/swim-club-node-1/export?token=${token}`);
     const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
 
     expect(res.status).toBe(200);

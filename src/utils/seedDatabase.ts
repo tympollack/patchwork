@@ -5,17 +5,18 @@ export async function seedDatabase() {
   try {
     console.log('Starting database seed...');
     
-    // Clear existing data to ensure fresh seed with new schema
+    if (typeof __DEV__ !== 'undefined' && !__DEV__) {
+      console.log('Skipping seedDatabase: Production environment detected.');
+      return;
+    }
+
+    // Never clear user-created reports. Only seed initial fixtures if database is completely empty.
     const existingNodes = await database.get('nodes').query().fetch();
     console.log('Found', existingNodes.length, 'existing nodes');
     
     if (existingNodes.length > 0) {
-      await database.write(async () => {
-        for (const node of existingNodes) {
-          await node.destroyPermanently();
-        }
-      });
-      console.log('Cleared existing nodes');
+      console.log('Database already contains node reports; preserving user records and skipping seed.');
+      return;
     }
 
     // Center point (Cincinnati)

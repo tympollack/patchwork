@@ -43,6 +43,15 @@ export const PinVerificationGate: React.FC<PinVerificationGateProps> = ({
       }
 
       setVerifiedSuccess(true);
+      if (typeof window !== 'undefined' && result.claimToken) {
+        try {
+          sessionStorage.setItem('active_claim_token', result.claimToken);
+          sessionStorage.setItem(`claim_token_${parcelPin}`, result.claimToken);
+          sessionStorage.setItem('active_parcel_pin', parcelPin);
+        } catch {
+          // ignore
+        }
+      }
       const destination = result.redirectUrl || `/audit/${zoningNodeId}`;
 
       if (onSuccess) {

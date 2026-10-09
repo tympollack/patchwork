@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 R2_BUCKET_NAME = "patchwork-ports-stag"
 WEBHOOK_URL = "" # Webhook target for critter bounties (e.g. https://api.patchwork.org/webhook/critter-bounty)
-ALLOWED_ORIGINS = "*" # Set specific comma-separated origins for web clients (e.g. "https://patchwork.app,http://localhost:8081")
+ALLOWED_ORIGINS = "https://patchwork-stag.sunshade.icu,https://patchwork.sunshade.icu,http://localhost:3000,http://localhost:8081" # Restricted origins for verifier clients
 REQUIRE_HARDWARE_ATTESTATION = "false" # Set "true" to require valid x-device-attestation header on upload requests
 
 # R2 bucket bindings

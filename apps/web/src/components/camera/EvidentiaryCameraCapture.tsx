@@ -16,6 +16,8 @@ export interface EvidentiaryCaptureResult {
 export interface EvidentiaryCameraCaptureProps {
   parcelPin?: string;
   zoningNodeId?: string;
+  claimToken?: string;
+  claimPin?: string;
   onCapture: (result: EvidentiaryCaptureResult) => void;
   onError?: (errorMessage: string) => void;
   className?: string;
@@ -24,6 +26,8 @@ export interface EvidentiaryCameraCaptureProps {
 export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> = ({
   parcelPin,
   zoningNodeId,
+  claimToken,
+  claimPin,
   onCapture,
   onError,
   className = '',
@@ -56,6 +60,9 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
 
   const handleCaptureClick = () => {
     setCapturedData(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     fileInputRef.current?.click();
   };
 
@@ -97,6 +104,23 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
 
       // 4. Request S3 presigned PUT URL
       setStatusText('Negotiating presigned cryptographic upload...');
+      let effectiveClaimToken = claimToken;
+      let effectiveClaimPin = claimPin;
+      if (typeof window !== 'undefined') {
+        if (!effectiveClaimToken) {
+          effectiveClaimToken =
+            (parcelPin ? sessionStorage.getItem(`claim_token_${parcelPin}`) : null) ||
+            sessionStorage.getItem('active_claim_token') ||
+            undefined;
+        }
+        if (!effectiveClaimPin) {
+          effectiveClaimPin =
+            (parcelPin ? sessionStorage.getItem(`claim_pin_${parcelPin}`) : null) ||
+            sessionStorage.getItem('active_claim_pin') ||
+            undefined;
+        }
+      }
+
       const presignRes = await fetch('/api/evidence/presign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -105,6 +129,8 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
           contentType: file.type || 'image/jpeg',
           parcelPin,
           zoningNodeId,
+          claimToken: effectiveClaimToken,
+          claimPin: effectiveClaimPin,
         }),
       });
 
@@ -147,6 +173,9 @@ export const EvidentiaryCameraCapture: React.FC<EvidentiaryCameraCaptureProps> =
       setIsProcessing(false);
       onCapture(result);
     } catch (err: any) {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
       setCapturedData(null);
       setIsProcessing(false);
       const msg = err.message || 'Evidence capture failed';

@@ -146,4 +146,15 @@ describe('TASK-PW-ZON-04: Zero-Install Parcel Credential Gate and 6-Box OTP Veri
     expect(lockedRes.success).toBe(false);
     expect(lockedRes.error).toContain('Rate limit engaged');
   });
+
+  it('enforces QR authToken when ENFORCE_QR_TOKEN is enabled or in production', async () => {
+    process.env.ENFORCE_QR_TOKEN = 'true';
+    try {
+      const res = await verifyParcelClaim('HAM-04-102-01', '123456');
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Direct-mail QR authentication token is strictly required');
+    } finally {
+      delete process.env.ENFORCE_QR_TOKEN;
+    }
+  });
 });

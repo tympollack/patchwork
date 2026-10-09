@@ -4,6 +4,7 @@ import {
   DEFAULT_SALT,
   DEFAULT_SECRET,
   generateAuthToken,
+  generateParcelStandingToken,
   getPinSalt,
   getAuthSecret,
 } from '../../../../packages/engine/src/scripts/generate-mail-manifest';
@@ -13,6 +14,7 @@ export interface VerifyParcelResult {
   error?: string;
   zoningNodeId?: string;
   redirectUrl?: string;
+  claimToken?: string;
 }
 
 // In-memory rate-limiter: track failed attempts per parcel PIN
@@ -63,6 +65,10 @@ export async function verifyParcelClaim(
   }
 
   // 3. QR Token Verification (if provided or enforced)
+  const isTokenEnforced =
+    process.env.ENFORCE_QR_TOKEN === 'true' ||
+    (process.env.NODE_ENV === 'production' && process.env.BYPASS_QR_TOKEN !== 'true');
+
   if (authToken) {
     const expectedToken = generateAuthToken(parcelPin, cleanPin, getAuthSecret());
     if (authToken !== expectedToken) {
@@ -71,7 +77,7 @@ export async function verifyParcelClaim(
         error: 'Invalid postcard QR authentication token. Possible forgery detected.',
       };
     }
-  } else if (process.env.ENFORCE_QR_TOKEN === 'true') {
+  } else if (isTokenEnforced) {
     return {
       success: false,
       error: 'Direct-mail QR authentication token is strictly required to claim parcel standing.',
@@ -152,10 +158,12 @@ export async function verifyParcelClaim(
   }
 
   const targetNodeId = parcel.zoning_node_id || defaultZoningNodeId;
+  const claimToken = generateParcelStandingToken(parcel.parcel_pin, parcel.id, getAuthSecret());
   return {
     success: true,
     zoningNodeId: targetNodeId,
-    redirectUrl: `/audit/${targetNodeId}`,
+    claimToken,
+    redirectUrl: `/audit/${targetNodeId}?buffer_parcel_id=${parcel.id}&parcel_pin=${encodeURIComponent(parcel.parcel_pin)}&claim_token=${claimToken}`,
   };
 }
 

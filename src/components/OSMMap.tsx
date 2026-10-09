@@ -19,6 +19,7 @@ export interface OSMMapProps {
   userLocation?: { lat: number; lng: number; heading: number } | null;
   onMarkerPress?: (id: string) => void;
   onHexagonPress?: (h3Index: string) => void;
+  onCenterChange?: (coords: { lat: number; lng: number }) => void;
 }
 
 const VALID_STATUSES = ['pending', 'awaiting_verification', 'verified', 'denied', 'archived'];
@@ -32,6 +33,7 @@ export default function OSMMap({
   userLocation,
   onMarkerPress,
   onHexagonPress,
+  onCenterChange,
 }: OSMMapProps) {
   const webViewRef = useRef<WebView>(null);
   const isMapReadyRef = useRef<boolean>(false);
@@ -251,9 +253,17 @@ export default function OSMMap({
           map.setView([lat, lng], zoom);
         };
 
+        map.on('moveend', function() {
+          const c = map.getCenter();
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'centerChange', lat: c.lat, lng: c.lng }));
+          }
+        });
+
         // Notify React Native that Leaflet map is ready to receive dynamic layers
         if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
+          const c = map.getCenter();
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady', lat: c.lat, lng: c.lng }));
         }
       </script>
     </body>
@@ -295,8 +305,13 @@ export default function OSMMap({
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === 'mapReady') {
               isMapReadyRef.current = true;
+              if (onCenterChange && typeof data.lat === 'number' && typeof data.lng === 'number') {
+                onCenterChange({ lat: data.lat, lng: data.lng });
+              }
               pushLayersUpdate();
               pushUserLocation();
+            } else if (data.type === 'centerChange' && onCenterChange) {
+              onCenterChange({ lat: data.lat, lng: data.lng });
             } else if (data.type === 'markerPress' && onMarkerPress) {
               onMarkerPress(data.id);
             } else if (data.type === 'hexPress' && onHexagonPress) {
