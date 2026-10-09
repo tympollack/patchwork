@@ -20,10 +20,11 @@ export async function executeBountyTrigger(
   let triggered = 0;
   let failed = 0;
   let page = 0;
+  let lastNodeId: string | null = null;
 
   while (page < MAX_PAGES) {
-    const offset = page * BATCH_SIZE;
-    const queryUrl = `${env.SUPABASE_URL}/rest/v1/nodes?status=eq.awaiting_verification&bounty_triggered=eq.false&created_at=lt.${cutoff}&select=node_id,latitude,longitude,h3_index&order=node_id.asc&limit=${BATCH_SIZE}&offset=${offset}`;
+    const cursorFilter = lastNodeId ? `&node_id=gt.${encodeURIComponent(lastNodeId)}` : '';
+    const queryUrl = `${env.SUPABASE_URL}/rest/v1/nodes?status=eq.awaiting_verification&bounty_triggered=eq.false&created_at=lt.${cutoff}&select=node_id,latitude,longitude,h3_index&order=node_id.asc&limit=${BATCH_SIZE}${cursorFilter}`;
     const fetchRes = await fetch(queryUrl, {
       headers: {
         apikey: env.SUPABASE_SERVICE_KEY,
@@ -87,6 +88,7 @@ export async function executeBountyTrigger(
       }
     }
 
+    lastNodeId = nodes[nodes.length - 1].node_id;
     if (nodes.length < BATCH_SIZE) break;
     page++;
   }

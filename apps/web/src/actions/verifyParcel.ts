@@ -63,6 +63,10 @@ export async function verifyParcelClaim(
   }
 
   // 3. QR Token Verification (if provided or enforced)
+  const isTokenEnforced =
+    process.env.ENFORCE_QR_TOKEN === 'true' ||
+    (process.env.NODE_ENV === 'production' && process.env.BYPASS_QR_TOKEN !== 'true');
+
   if (authToken) {
     const expectedToken = generateAuthToken(parcelPin, cleanPin, getAuthSecret());
     if (authToken !== expectedToken) {
@@ -71,7 +75,7 @@ export async function verifyParcelClaim(
         error: 'Invalid postcard QR authentication token. Possible forgery detected.',
       };
     }
-  } else if (process.env.ENFORCE_QR_TOKEN === 'true') {
+  } else if (isTokenEnforced) {
     return {
       success: false,
       error: 'Direct-mail QR authentication token is strictly required to claim parcel standing.',

@@ -77,15 +77,30 @@ interface R2EventMessage {
 // ---------------------------------------------------------------------------
 export function getCorsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get('origin') || '';
-  const allowed = env.ALLOWED_ORIGINS || '*';
+  const allowed = env.ALLOWED_ORIGINS;
 
-  let allowOrigin = '*';
-  if (allowed !== '*') {
+  let allowOrigin = 'null';
+  if (allowed === '*') {
+    allowOrigin = '*';
+  } else if (allowed) {
     const originsList = allowed.split(',').map((o) => o.trim().toLowerCase());
     if (origin && originsList.includes(origin.toLowerCase())) {
       allowOrigin = origin;
     } else {
       allowOrigin = originsList[0] || 'null';
+    }
+  } else {
+    // Default safe origin whitelist when ALLOWED_ORIGINS is unset
+    const defaultOrigins = [
+      'https://patchwork-stag.sunshade.icu',
+      'https://patchwork.sunshade.icu',
+      'http://localhost:3000',
+      'http://localhost:8081',
+    ];
+    if (origin && defaultOrigins.includes(origin.toLowerCase())) {
+      allowOrigin = origin;
+    } else {
+      allowOrigin = defaultOrigins[0];
     }
   }
 
@@ -195,7 +210,7 @@ async function createPendingNode(
   longitude: number
 ): Promise<void> {
   const url = `${env.SUPABASE_URL}/rest/v1/nodes?on_conflict=node_id`;
-  await fetch(url, {
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -214,6 +229,11 @@ async function createPendingNode(
       sync_status: 'pending_sync',
     }),
   });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to create pending node in database: HTTP ${res.status} — ${errText.slice(0, 200)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------

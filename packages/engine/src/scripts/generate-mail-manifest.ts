@@ -68,8 +68,12 @@ export function hashPin(pin: string, salt: string = DEFAULT_SALT): string {
  * Verify plaintext PIN against stored SHA-256 hash
  */
 export function verifyPinHash(pin: string, expectedHash: string, salt: string = DEFAULT_SALT): boolean {
+  if (!expectedHash || typeof expectedHash !== 'string') return false;
   const computed = hashPin(pin, salt);
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(expectedHash));
+  const bufA = Buffer.from(computed);
+  const bufB = Buffer.from(expectedHash);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 /**

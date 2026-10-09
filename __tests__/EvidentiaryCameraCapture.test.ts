@@ -62,4 +62,21 @@ describe('TASK-PW-ZON-05: Hardware-Attested In-App Camera Sightline Capture Comp
     expect(data.requiredHeaders['x-amz-checksum-sha256']).toBeDefined();
     expect(data.sha256).toBe(validHash);
   });
+
+  it('rejects unauthenticated requests supplying only zoningNodeId without parcel standing', async () => {
+    const validHash = 'a'.repeat(64);
+    const req = new Request('http://localhost:3000/api/evidence/presign', {
+      method: 'POST',
+      body: JSON.stringify({
+        sha256: validHash,
+        zoningNodeId: 'swim-club-node-1',
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+
+    const data = await res.json();
+    expect(data.error).toContain('evidence uploads by docket ID require active verifier authentication');
+  });
 });

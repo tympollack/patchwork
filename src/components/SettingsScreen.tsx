@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -151,6 +152,22 @@ export default function SettingsScreen() {
         />
       </Row>
 
+      <Section title="NETWORK" />
+
+      <Row label="BACKEND URL" sub="Cloudflare Worker endpoint for uploads">
+        <View style={styles.inputWrap}>
+          <TextInput
+            style={styles.input}
+            value={settings.apiBase}
+            placeholder="https://..."
+            placeholderTextColor="#4A6572"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={(v) => settings.set({ apiBase: v.trim() })}
+          />
+        </View>
+      </Row>
+
       <Section title="DANGER ZONE" />
 
       <TouchableOpacity style={styles.resetBtn} onPress={() => settings.reset()}>
@@ -213,4 +230,15 @@ const styles = StyleSheet.create({
   resetBtnText: { fontFamily: 'monospace', fontSize: 10, color: '#FF5555', letterSpacing: 2 },
   signOutBtn: { marginTop: 10, borderColor: '#6495ED' },
   signOutBtnText: { color: '#6495ED' },
+  inputWrap: { width: 170 },
+  input: {
+    fontFamily: 'monospace',
+    fontSize: 9,
+    color: '#00FFFF',
+    borderWidth: 1,
+    borderColor: '#6495ED',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(10, 17, 40, 0.8)',
+  },
 });

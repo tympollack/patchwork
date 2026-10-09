@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { supabase } from '../../../../../../../src/lib/supabase';
 
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     // Check if this is an upload completion / ledger sync request
-    if (body.action === 'complete' || body.confirm === true) {
+    if (body.action === 'complete' || body.action === 'complete-upload' || body.confirm === true) {
       return handleCompleteUpload(user!, body);
     }
 
@@ -249,7 +249,32 @@ async function handleCompleteUpload(user: { id: string }, body: any) {
   const lngNum = gpsLng == null ? null : isFinite(Number(gpsLng)) ? Number(gpsLng) : null;
   const headingNum = azHeading == null ? null : isFinite(Number(azHeading)) ? Number(azHeading) : null;
 
-  // 1. Persist immutable evidence row to patchwork.ports
+  // 1. Verify object existence in R2 staging/production bucket
+  let objectKey = '';
+  try {
+    const parsed = new URL(imageUrl);
+    objectKey = parsed.pathname.replace(/^\/+/, '');
+  } catch {
+    objectKey = imageUrl.replace(/^\/+/, '');
+  }
+
+  if (typeof s3.send === 'function') {
+    try {
+      await s3.send(
+        new HeadObjectCommand({
+          Bucket: R2_BUCKET_NAME,
+          Key: objectKey,
+        })
+      );
+    } catch {
+      return Response.json(
+        { error: `Evidentiary asset verification failed: object '${objectKey}' not found in storage.` },
+        { status: 400 }
+      );
+    }
+  }
+
+  // 2. Persist immutable evidence row to patchwork.ports
   const { data: portRow, error: portError } = await supabase
     .schema('patchwork')
     .from('ports')

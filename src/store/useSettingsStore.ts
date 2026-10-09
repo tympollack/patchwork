@@ -21,9 +21,11 @@ interface SettingsStore extends AppSettings {
 }
 
 const DEFAULTS: AppSettings = {
-  apiBase: '',           // intentionally empty — user must set a valid HTTPS URL in Settings
+  apiBase:
+    process.env.EXPO_PUBLIC_WORKER_URL ||
+    'https://patchwork-upload-processor.sunshade.workers.dev',
   hapticsEnabled: true,
-  seedOnLaunch: true,
+  seedOnLaunch: false,
   mapDefaultLat: 39.0501,
   mapDefaultLng: -84.1915,
   cameraQuality: 1.0,

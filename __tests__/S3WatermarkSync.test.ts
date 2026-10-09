@@ -1,7 +1,10 @@
-// Mock AWS S3 SDK before importing route to prevent untransformed ES module import in Jest
+const mockSend = jest.fn().mockResolvedValue({});
 jest.mock('@aws-sdk/client-s3', () => ({
-  S3Client: jest.fn().mockImplementation(() => ({})),
+  S3Client: jest.fn().mockImplementation(() => ({
+    send: (args: any) => mockSend(args),
+  })),
   PutObjectCommand: jest.fn().mockImplementation((args) => args),
+  HeadObjectCommand: jest.fn().mockImplementation((args) => args),
 }));
 
 // Mock S3 presigner
@@ -334,6 +337,40 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Missing required parameters');
+    });
+
+    it('POST rejects complete-upload when R2 object does not exist in storage', async () => {
+      mockGetUser.mockResolvedValueOnce({
+        data: { user: { id: 'test-user-uuid' } },
+        error: null,
+      });
+
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { node_id: 'test-node-101', status: 'pending', user_id: 'test-user-uuid' },
+        error: null,
+      });
+
+      mockSend.mockRejectedValueOnce(new Error('NotFound: NoSuchKey'));
+
+      const req = new Request('https://test/api/ports/request-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
+        body: JSON.stringify({
+          action: 'complete-upload',
+          nodeId: 'test-node-101',
+          imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
+          imageHash: sampleHexSha256,
+        }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.error).toContain('Evidentiary asset verification failed');
     });
   });
 });

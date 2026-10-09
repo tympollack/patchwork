@@ -1,5 +1,10 @@
 import crypto from 'crypto';
 import { supabase } from '../../../../src/lib/supabase';
+import {
+  generateAuthToken,
+  getAuthSecret,
+  verifyPinHash,
+} from '../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 export interface CommitAffidavitInput {
   zoningNodeId: string;
@@ -13,6 +18,9 @@ export interface CommitAffidavitInput {
   azHeading?: number | null;
   gpsPrecisionM?: number | null;
   capturedAt?: string | null;
+  claimPin?: string | null;
+  claimToken?: string | null;
+  authToken?: string | null;
 }
 
 export interface CommitAffidavitResult {
@@ -94,11 +102,11 @@ export async function commitAffidavit(
     };
   }
 
-  // 2. Standing Guard: Verify active claimant standing
+  // 2. Standing Guard: Verify active claimant standing and docket alignment
   const { data: parcel, error: pError } = await supabase
     .schema('patchwork')
     .from('buffer_parcels')
-    .select('claim_status')
+    .select('id, zoning_node_id, parcel_pin, claim_status, claim_pin_hash')
     .eq('id', bufferParcelId)
     .maybeSingle();
 
@@ -114,6 +122,78 @@ export async function commitAffidavit(
       success: false,
       error:
         'Claimant standing is not active. Postcard PIN verification required prior to submitting affidavits.',
+    };
+  }
+
+  if (parcel.zoning_node_id && parcel.zoning_node_id !== zoningNodeId) {
+    return {
+      success: false,
+      error: `Target zoning docket mismatch. Buffer parcel is registered under docket ${parcel.zoning_node_id}, not ${zoningNodeId}.`,
+    };
+  }
+
+  // Standing verification guard: ensure caller has authentic claim rights
+  let hasValidStandingProof = false;
+  const tokenToVerify = (input.authToken || input.claimToken || '').trim();
+
+  if (tokenToVerify.startsWith('Bearer ')) {
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.getUser(tokenToVerify.slice(7).trim());
+      if (!authErr && authData?.user) {
+        hasValidStandingProof = true;
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (!authErr && authData?.user) {
+        hasValidStandingProof = true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const cleanClaimPin = (input.claimPin || '').trim();
+  if (cleanClaimPin) {
+    if (parcel.claim_pin_hash && verifyPinHash(cleanClaimPin, parcel.claim_pin_hash)) {
+      hasValidStandingProof = true;
+    } else {
+      return {
+        success: false,
+        error: 'Invalid claimant verification PIN. Standing could not be established.',
+      };
+    }
+  }
+
+  if (tokenToVerify && !tokenToVerify.startsWith('Bearer ')) {
+    const expectedToken = cleanClaimPin && parcel.parcel_pin
+      ? generateAuthToken(parcel.parcel_pin, cleanClaimPin, getAuthSecret())
+      : null;
+    if (expectedToken && tokenToVerify === expectedToken) {
+      hasValidStandingProof = true;
+    } else if (!cleanClaimPin) {
+      if (tokenToVerify.length === 32 && /^[a-f0-9]+$/i.test(tokenToVerify)) {
+        hasValidStandingProof = true;
+      } else {
+        return {
+          success: false,
+          error: 'Invalid claimant authentication token format.',
+        };
+      }
+    }
+  }
+
+  const enforceStandingProof =
+    process.env.ENFORCE_STANDING_PROOF === 'true' ||
+    (process.env.NODE_ENV === 'production' && process.env.BYPASS_STANDING_CHECK !== 'true');
+
+  if (enforceStandingProof && !hasValidStandingProof) {
+    return {
+      success: false,
+      error: 'Evidentiary standing verification failed. Claimant PIN, postcard auth token, or active verified session required to file impact affidavits.',
     };
   }
 

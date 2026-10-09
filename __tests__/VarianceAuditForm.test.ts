@@ -297,5 +297,88 @@ describe('TASK-PW-FIELD-AUDIT-FORM: Environmental & Setback Audit Form Schema', 
         })
       );
     });
+
+    it('rejects submission if buffer parcel is registered under a different zoning docket', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          id: 'test-parcel-id',
+          zoning_node_id: 'docket-uuid-abc',
+          claim_status: 'verified',
+        },
+        error: null,
+      });
+
+      const res = await commitVarianceAudit({
+        parcelPin: 'PIN-550-84-01',
+        zoningNodeId: 'docket-uuid-different',
+        setbackDistanceFt: 35,
+        bufferStatus: 'Intact',
+        drainageErosionIndex: 1,
+        observableImpact: 'Normal grading buffer intact.',
+        evidenceS3Url: 'https://r2.storage/evidence_550.jpg',
+        evidenceSha256: validHexSha256,
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Target zoning docket mismatch');
+    });
+
+    it('rejects submission if caller provides an invalid claimant verification PIN', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          id: 'test-parcel-id',
+          zoning_node_id: 'docket-uuid-abc',
+          parcel_pin: 'PIN-550-84-01',
+          claim_status: 'verified',
+          claim_pin_hash: 'valid-pin-hash',
+        },
+        error: null,
+      });
+
+      const res = await commitVarianceAudit({
+        parcelPin: 'PIN-550-84-01',
+        setbackDistanceFt: 35,
+        bufferStatus: 'Intact',
+        drainageErosionIndex: 1,
+        observableImpact: 'Normal grading buffer intact.',
+        evidenceS3Url: 'https://r2.storage/evidence_550.jpg',
+        evidenceSha256: validHexSha256,
+        claimPin: '000000',
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toContain('Invalid claimant verification PIN');
+    });
+
+    it('enforces standing proof when ENFORCE_STANDING_PROOF is enabled', async () => {
+      process.env.ENFORCE_STANDING_PROOF = 'true';
+      try {
+        mockMaybeSingle.mockResolvedValueOnce({
+          data: {
+            id: 'test-parcel-id',
+            zoning_node_id: 'docket-uuid-abc',
+            parcel_pin: 'PIN-550-84-01',
+            claim_status: 'verified',
+            claim_pin_hash: 'valid-pin-hash',
+          },
+          error: null,
+        });
+
+        const res = await commitVarianceAudit({
+          parcelPin: 'PIN-550-84-01',
+          setbackDistanceFt: 35,
+          bufferStatus: 'Intact',
+          drainageErosionIndex: 1,
+          observableImpact: 'Normal grading buffer intact.',
+          evidenceS3Url: 'https://r2.storage/evidence_550.jpg',
+          evidenceSha256: validHexSha256,
+        });
+
+        expect(res.success).toBe(false);
+        expect(res.error).toContain('Evidentiary standing verification failed');
+      } finally {
+        delete process.env.ENFORCE_STANDING_PROOF;
+      }
+    });
   });
 });

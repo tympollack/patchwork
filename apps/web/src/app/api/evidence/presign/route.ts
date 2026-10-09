@@ -33,7 +33,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Authorization guard: verify docket exists and is active
+    // 2. Authorization guard: require authenticated verifier session or registered parcel standing
+    const authHeader = request.headers.get('authorization');
+    let isAuthenticatedUser = false;
+
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7).trim();
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user) {
+          isAuthenticatedUser = true;
+        }
+      } catch {
+        // invalid token
+      }
+    }
+
+    if (!isAuthenticatedUser && !parcelPin) {
+      return Response.json(
+        { error: 'Unauthorized: evidence uploads by docket ID require active verifier authentication.' },
+        { status: 401 }
+      );
+    }
+
     if (!zoningNodeId && !parcelPin) {
       return Response.json(
         { error: 'Active zoning docket ID or registered parcel PIN required for evidence upload.' },

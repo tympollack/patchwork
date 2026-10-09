@@ -46,6 +46,7 @@ function makeEnv(overrides: Partial<Record<string, unknown>> = {}) {
     R2_BUCKET_NAME: 'patchwork-ports-stag',
     CRON_SECRET: 'test-cron-secret',
     WEBHOOK_URL: 'https://api.patchwork.org/webhook/critter-bounty',
+    ALLOWED_ORIGINS: '*',
     ...overrides,
   };
 }
@@ -333,6 +334,18 @@ describe('Worker HTTP Fetch Handler (worker.fetch)', () => {
 
     expect(res.status).toBe(204);
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:8081');
+  });
+
+  it('OPTIONS restricts to safe whitelist when ALLOWED_ORIGINS is unset', async () => {
+    const env = makeEnv({ ALLOWED_ORIGINS: undefined });
+    const req = new Request('https://worker.test/api/nodes?min_lat=40.0&min_lng=-75.0&max_lat=41.0&max_lng=-73.0', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://patchwork-stag.sunshade.icu' },
+    });
+    const res = await worker.fetch(req, env as any);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://patchwork-stag.sunshade.icu');
   });
 
   it('POST /api/cron/bounty-trigger returns skipped message when WEBHOOK_URL is not set', async () => {

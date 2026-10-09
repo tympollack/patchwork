@@ -32,25 +32,28 @@ export default function MapScreen() {
   const [selectedHexIndex, setSelectedHexIndex] = useState<string | null>(null);
 
   // Compute H3 Resolution-10 Hexagonal aggregation
-  const hexagons = useMemo(
-    () => aggregateNodesToH3Hexagons(nodes, { resolution: 10 }),
-    [nodes]
-  );
+  const hexagons = useMemo(() => aggregateNodesToH3Hexagons(nodes, { resolution: 10 }), [nodes]);
 
   // Memoize marker representations from WatermelonDB nodes to prevent unnecessary map redraws
-  const markers = useMemo(
-    () => nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status })),
-    [nodes]
-  );
+  const markers = useMemo(() => nodes.map((n: any) => ({ id: n.id, lat: n.lat, lng: n.long, status: n.status })), [nodes]);
 
   // Derive active selected hexagon from current aggregate; updates dynamically if nodes change
-  const selectedHexagon = useMemo(
-    () => (selectedHexIndex ? hexagons.find((h) => h.h3Index === selectedHexIndex) || null : null),
-    [hexagons, selectedHexIndex]
-  );
+  const selectedHexagon = useMemo(() => (selectedHexIndex ? hexagons.find((h) => h.h3Index === selectedHexIndex) || null : null), [hexagons, selectedHexIndex]);
   // Keep a ref to current mode so event callbacks don't capture stale closures
   const modeRef = useRef(mode);
   useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  const mapCenterRef = useRef<{ lat: number; lng: number }>({
+    lat: userLocation?.lat || mapDefaultLat,
+    lng: userLocation?.lng || mapDefaultLng,
+  });
+
+  const handleCenterChange = (coords: { lat: number; lng: number }) => {
+    mapCenterRef.current = coords;
+    if (modeRef.current === 'manual') {
+      setManualCoord({ lat: coords.lat, long: coords.lng });
+    }
+  };
 
   // subscribe to db
   useNodeSubscription();
@@ -124,11 +127,14 @@ export default function MapScreen() {
   };
 
   const confirmManual = async () => {
-    if (!manualCoord) return;
+    const target = manualCoord || {
+      lat: mapCenterRef.current.lat,
+      long: mapCenterRef.current.lng,
+    };
+    if (!target) return;
     haptic(Haptics.ImpactFeedbackStyle.Heavy);
-    await addQuick(manualCoord.lat, manualCoord.long);
+    await addQuick(target.lat, target.long);
     haptic(Haptics.ImpactFeedbackStyle.Light);
-    console.log('Manual pin:', manualCoord);
     setToastMsg('PIN CONFIRMED');
     setShowConfirm(true);
     setTimeout(() => setShowConfirm(false), 2000);
@@ -147,6 +153,7 @@ export default function MapScreen() {
         userLocation={userLocation}
         onMarkerPress={handleMarkerPress}
         onHexagonPress={handleHexagonPress}
+        onCenterChange={handleCenterChange}
       />
 
       {/* Privacy Mask Toggle Pill (Top-Right) */}
@@ -212,7 +219,17 @@ export default function MapScreen() {
             <TouchableOpacity style={styles.primaryBtn} onPress={handleQuick} activeOpacity={0.75}>
               <Text style={styles.primaryBtnText}>ONE-TAP CAPTURE</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => setMode('manual')} activeOpacity={0.75}>
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => {
+                setMode('manual');
+                setManualCoord({
+                  lat: mapCenterRef.current.lat,
+                  long: mapCenterRef.current.lng,
+                });
+              }}
+              activeOpacity={0.75}
+            >
               <Text style={styles.secondaryBtnText}>MANUAL PIN</Text>
             </TouchableOpacity>
           </>
