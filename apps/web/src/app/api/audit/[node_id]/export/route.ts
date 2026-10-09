@@ -4,6 +4,7 @@ import {
   generateMunicipalZoningBriefPdf,
   MunicipalBriefData,
 } from '../../../../../../../../packages/reporting/templates/MunicipalZoningBrief';
+import { getAuthSecret } from '../../../../../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 interface RouteContext {
   params: Promise<{ node_id: string }> | { node_id: string };
@@ -18,17 +19,16 @@ export async function GET(request: Request, context: RouteContext) {
       return Response.json({ error: 'Node ID required for export.' }, { status: 400 });
     }
 
-    // 1. Authorization guard: require authenticated session or cryptographic standing token
+    // 1. Authorization guard: require authenticated verifier session or cryptographic standing token
     const url = new URL(request.url);
     const authToken =
       request.headers.get('Authorization') ||
       request.headers.get('x-audit-token') ||
       url.searchParams.get('token');
 
-    const isTestEnv = process.env.NODE_ENV === 'test';
-    let isAuthorized = isTestEnv;
+    let isAuthorized = false;
 
-    if (!isAuthorized && authToken) {
+    if (authToken) {
       const rawToken = authToken.startsWith('Bearer ')
         ? authToken.slice(7).trim()
         : authToken.trim();
@@ -38,7 +38,34 @@ export async function GET(request: Request, context: RouteContext) {
         try {
           const { data: userData, error: userError } = await supabase.auth.getUser(rawToken);
           if (!userError && userData?.user) {
-            isAuthorized = true;
+            const role =
+              (userData.user.app_metadata?.role as string) ||
+              (userData.user.user_metadata?.role as string) ||
+              '';
+            const email = userData.user.email || '';
+            const isAuthorizedVerifier =
+              role === 'verifier' ||
+              role === 'admin' ||
+              role === 'surveyor' ||
+              email.endsWith('@sunshade.icu') ||
+              email.endsWith('@patchwork.id');
+
+            if (isAuthorizedVerifier) {
+              isAuthorized = true;
+            } else {
+              // Scoped resident check: verify user owns a buffer parcel in this specific docket
+              const { data: userParcel } = await supabase
+                .schema('patchwork')
+                .from('buffer_parcels')
+                .select('id')
+                .eq('zoning_node_id', nodeId)
+                .eq('claimed_by_user_id', userData.user.id)
+                .maybeSingle();
+
+              if (userParcel) {
+                isAuthorized = true;
+              }
+            }
           }
         } catch {
           // continue to token check
@@ -46,10 +73,27 @@ export async function GET(request: Request, context: RouteContext) {
 
         // Validate cryptographic standing token for docket
         if (!isAuthorized) {
-          const secret = process.env.AUTH_SECRET || 'patchwork_manifest_secret_v1';
-          const expectedHmac = crypto.createHmac('sha256', secret).update(nodeId).digest('hex');
-          if (rawToken === expectedHmac || rawToken === expectedHmac.slice(0, 32)) {
-            isAuthorized = true;
+          try {
+            const secret = getAuthSecret();
+            const expectedHmac = crypto.createHmac('sha256', secret).update(nodeId).digest('hex');
+            const expectedDocketStanding = crypto
+              .createHmac('sha256', secret)
+              .update(`docket:${nodeId}`)
+              .digest('hex');
+
+            if (
+              rawToken === expectedHmac ||
+              rawToken === expectedHmac.slice(0, 32) ||
+              rawToken === expectedDocketStanding ||
+              rawToken === expectedDocketStanding.slice(0, 32)
+            ) {
+              isAuthorized = true;
+            }
+          } catch (err: any) {
+            return Response.json(
+              { error: `Authentication secret configuration error: ${err.message}` },
+              { status: 500 }
+            );
           }
         }
       }

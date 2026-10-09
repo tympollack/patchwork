@@ -65,8 +65,19 @@ export const useNodeStore = create<State>((set, get) => ({
       const pending = allNodes.filter((n) => n.nodeSyncStatus === 'pending_sync');
       if (pending.length === 0) return 0;
 
-      const base = apiBase || useSettingsStore.getState().apiBase;
+      const base = (apiBase || useSettingsStore.getState().apiBase || '').trim();
       if (!base) return 0;
+
+      const isSecure =
+        base.startsWith('https://') ||
+        (__DEV__ &&
+          (base.startsWith('http://localhost') ||
+            base.startsWith('http://127.0.0.1') ||
+            base.startsWith('http://10.0.2.2')));
+      if (!isSecure) {
+        console.warn('Plain HTTP backend rejected: HTTPS required to protect report coordinates');
+        return 0;
+      }
 
       let synced = 0;
       for (const node of pending) {

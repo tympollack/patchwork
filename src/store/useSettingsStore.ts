@@ -4,8 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface AppSettings {
   /** Base URL for the PatchWork backend API.
-   *  Defaults to empty string — must be configured in Settings before uploads work.
-   *  Never defaults to a plain HTTP address so intercepted requests can't sniff data. */
+   *  Defaults to EXPO_PUBLIC_WORKER_URL or https://patchwork-upload-processor.sunshade.workers.dev.
+   *  Must use HTTPS (or localhost in dev) so intercepted requests cannot sniff coordinate data. */
   apiBase: string;
   hapticsEnabled: boolean;
   seedOnLaunch: boolean;

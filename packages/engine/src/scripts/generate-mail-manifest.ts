@@ -88,6 +88,21 @@ export function generateAuthToken(parcelPin: string, pin: string, secret: string
 }
 
 /**
+ * Generate cryptographically signed standing proof token for a verified buffer parcel
+ */
+export function generateParcelStandingToken(
+  parcelPin: string,
+  parcelId: string,
+  secret: string = DEFAULT_SECRET
+): string {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`standing:${parcelPin}:${parcelId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+/**
  * Construct postcard target URL: https://patchwork.id/verify?p={PARCEL_PIN}&t={AUTH_TOKEN}
  */
 export function buildQrDestinationUrl(

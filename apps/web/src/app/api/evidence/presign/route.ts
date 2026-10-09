@@ -1,6 +1,12 @@
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { supabase } from '../../../../../../../src/lib/supabase';
+import {
+  generateAuthToken,
+  generateParcelStandingToken,
+  getAuthSecret,
+  verifyPinHash,
+} from '../../../../../../../packages/engine/src/scripts/generate-mail-manifest';
 
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || 'dummy-account-id';
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID || 'dummy-access-key';
@@ -23,7 +29,7 @@ const s3 = new S3Client({
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { sha256, contentType = 'image/jpeg', parcelPin, zoningNodeId } = body;
+    const { sha256, contentType = 'image/jpeg', parcelPin, zoningNodeId, claimToken, claimPin } = body;
 
     // 1. Check SHA-256 validity
     if (!sha256 || !/^[a-fA-F0-9]{64}$/.test(sha256)) {
@@ -83,7 +89,7 @@ export async function POST(request: Request) {
       const { data: parcel, error: parcelErr } = await supabase
         .schema('patchwork')
         .from('buffer_parcels')
-        .select('id, claim_status, zoning_node_id')
+        .select('id, claim_status, zoning_node_id, parcel_pin, claim_pin_hash')
         .eq('parcel_pin', parcelPin)
         .maybeSingle();
 
@@ -106,6 +112,35 @@ export async function POST(request: Request) {
           { error: 'Unauthorized: parcel PIN does not belong to specified zoning docket.' },
           { status: 403 }
         );
+      }
+
+      // Comment 8 fix: unauthenticated requests targeting a parcel must provide valid claim proof
+      if (!isAuthenticatedUser) {
+        let hasProof = false;
+        const cleanClaimPin = (claimPin || '').trim();
+        if (cleanClaimPin && parcel.claim_pin_hash && verifyPinHash(cleanClaimPin, parcel.claim_pin_hash)) {
+          hasProof = true;
+        }
+
+        const token = (claimToken || '').trim();
+        if (!hasProof && token) {
+          const secret = getAuthSecret();
+          const expectedStandingToken = generateParcelStandingToken(parcel.parcel_pin, parcel.id, secret);
+          const expectedAuthToken = cleanClaimPin
+            ? generateAuthToken(parcel.parcel_pin, cleanClaimPin, secret)
+            : null;
+
+          if (token === expectedStandingToken || (expectedAuthToken && token === expectedAuthToken)) {
+            hasProof = true;
+          }
+        }
+
+        if (!hasProof) {
+          return Response.json(
+            { error: 'Unauthorized: evidence uploads require active verifier authentication or valid parcel standing credentials.' },
+            { status: 401 }
+          );
+        }
       }
     }
 

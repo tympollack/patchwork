@@ -161,10 +161,74 @@ export function createWebServer() {
       msg.textContent = 'Verifying cryptographic parcel standing ledger...';
       msg.style.display = 'block';
       setTimeout(function() {
-        window.location.href = '/audit/variance?p=' + encodeURIComponent(p) + '&pin=' + encodeURIComponent(code);
+        const token = document.getElementById('tokenInput').value.trim();
+        window.location.href = '/audit/variance?parcel_pin=' + encodeURIComponent(p) + '&claim_pin=' + encodeURIComponent(code) + (token ? '&token=' + encodeURIComponent(token) : '');
       }, 600);
     });
   </script>
+</body>
+</html>`);
+        return;
+      }
+
+      // 4. Web Portal variance audit page for /audit/variance
+      if (pathname === '/audit/variance' && req.method === 'GET') {
+        const escapeHtml = (s) =>
+          String(s || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+        const rawParcel = parsedUrl.query.parcel_pin || parsedUrl.query.p || '';
+        const rawPin = parsedUrl.query.claim_pin || parsedUrl.query.pin || '';
+        const safeParcel = escapeHtml(String(rawParcel).replace(/[^a-zA-Z0-9_-]/g, ''));
+        const safePin = escapeHtml(String(rawPin).replace(/[^0-9]/g, ''));
+
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patchwork Topographic Variance &amp; Setback Field Audit</title>
+  <style>
+    body { background-color: #0A1128; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; margin: 0; padding: 40px 20px; }
+    .container { max-width: 680px; margin: 0 auto; border: 1px solid #4A90E2; padding: 28px; background: rgba(10, 17, 40, 0.95); box-shadow: 0 0 20px rgba(0, 229, 255, 0.1); }
+    h1 { color: #00E5FF; font-size: 18px; margin-top: 0; letter-spacing: 0.1em; }
+    .badge { display: inline-block; font-family: monospace; font-size: 12px; color: #00E5FF; border: 1px solid rgba(0, 229, 255, 0.4); padding: 4px 8px; margin-bottom: 16px; }
+    p { color: #94A3B8; font-size: 13px; line-height: 1.6; }
+    .field { margin: 16px 0; }
+    label { display: block; font-size: 11px; color: #6495ED; letter-spacing: 0.08em; margin-bottom: 6px; font-family: monospace; }
+    input[type="text"], select, textarea { width: 100%; box-sizing: border-box; background: #070D1E; border: 1px solid #6495ED; color: #00E5FF; font-family: monospace; font-size: 14px; padding: 10px 12px; outline: none; }
+    button { width: 100%; margin-top: 16px; background: #00E5FF; color: #0A1128; border: none; font-family: monospace; font-weight: bold; font-size: 13px; padding: 12px; cursor: pointer; letter-spacing: 0.1em; }
+    button:hover { background: #33EBFF; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badge">TARGET PIN: ${safeParcel || 'NOT SPECIFIED'}</div>
+    <h1>TOPOGRAPHIC VARIANCE &amp; SETBACK FIELD AUDIT</h1>
+    <p>Statutory Municipal Code § 14-A • Evidentiary Standing Confirmed.</p>
+    <div class="field">
+      <label>SETBACK DISTANCE (FEET)</label>
+      <input type="text" id="setback" placeholder="e.g. 35.5" />
+    </div>
+    <div class="field">
+      <label>BUFFER STATUS</label>
+      <select id="bufferStatus">
+        <option value="Intact">INTACT - Vegetative buffer undisturbed</option>
+        <option value="Degraded">DEGRADED - Canopy thinning observed</option>
+        <option value="Encroached">ENCROACHED - Direct clearing or grading</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>OBSERVABLE IMPACT STATEMENT (MAX 180 CHARS)</label>
+      <textarea id="impact" rows="3" maxlength="180" placeholder="Describe physical buffer impact..."></textarea>
+    </div>
+    <button type="button" onclick="alert('Statutory audit recorded.')">SUBMIT VARIANCE AUDIT</button>
+  </div>
 </body>
 </html>`);
         return;

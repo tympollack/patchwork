@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import {
   generateMunicipalZoningBriefPdf,
   renderMunicipalZoningBriefHtml,
@@ -6,13 +7,18 @@ import {
 import { GET } from '../apps/web/src/app/api/audit/[node_id]/export/route';
 import { supabase } from '../src/lib/supabase';
 import { HTN_TRUST_STRING } from '../apps/web/src/styles/tokens';
+import { getAuthSecret } from '../packages/engine/src/scripts/generate-mail-manifest';
 
 const mockMaybeSingle = jest.fn();
 const mockEqParcels = jest.fn();
 const mockEqAffidavits = jest.fn();
+const mockGetUser = jest.fn();
 
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
+    auth: {
+      getUser: (...args: any[]) => mockGetUser(...args),
+    },
     schema: jest.fn().mockReturnValue({
       from: jest.fn().mockImplementation((table: string) => {
         if (table === 'zoning_nodes') {
@@ -27,7 +33,13 @@ jest.mock('../src/lib/supabase', () => ({
         if (table === 'buffer_parcels') {
           return {
             select: jest.fn().mockReturnValue({
-              eq: () => mockEqParcels(),
+              eq: jest.fn().mockImplementation(() => {
+                const res: any = Promise.resolve(mockEqParcels());
+                res.eq = jest.fn().mockReturnValue({
+                  maybeSingle: () => mockMaybeSingle(),
+                });
+                return res;
+              }),
             }),
           };
         }
@@ -143,12 +155,32 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
     expect(html).toContain('Section 4: Cryptographic Chain of Custody');
   });
 
-  it('GET export route returns application/pdf with Content-Disposition attachment header', async () => {
+  it('rejects GET export route without valid token or credentials with 401', async () => {
+    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export');
+    const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects GET export route when authenticated user is not an authorized verifier and owns no parcel', async () => {
+    mockGetUser.mockResolvedValueOnce({
+      data: { user: { id: 'regular-user', app_metadata: { role: 'resident' }, email: 'user@example.com' } },
+      error: null,
+    });
+    mockMaybeSingle.mockResolvedValueOnce({ data: null, error: null });
+
+    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export', {
+      headers: { Authorization: 'Bearer regular-token' },
+    });
+    const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('GET export route returns application/pdf with Content-Disposition attachment header when given valid token', async () => {
     mockMaybeSingle.mockResolvedValueOnce({
       data: sampleData.zoningNode,
       error: null,
     });
-    mockEqParcels.mockResolvedValueOnce({
+    mockEqParcels.mockReturnValueOnce({
       data: sampleData.parcels,
       error: null,
     });
@@ -157,7 +189,9 @@ describe('TASK-PW-ZON-07: Municipal Dossier Aggregation and Certified PDF Export
       error: null,
     });
 
-    const req = new Request('http://localhost:3000/api/audit/swim-club-node-1/export?test=true');
+    const secret = getAuthSecret();
+    const token = crypto.createHmac('sha256', secret).update('swim-club-node-1').digest('hex');
+    const req = new Request(`http://localhost:3000/api/audit/swim-club-node-1/export?token=${token}`);
     const res = await GET(req, { params: Promise.resolve({ node_id: 'swim-club-node-1' }) });
 
     expect(res.status).toBe(200);

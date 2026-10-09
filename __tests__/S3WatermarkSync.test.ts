@@ -350,7 +350,7 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
         error: null,
       });
 
-      mockSend.mockRejectedValueOnce(new Error('NotFound: NoSuchKey'));
+      mockSend.mockRejectedValue(new Error('NotFound: NoSuchKey'));
 
       const req = new Request('https://test/api/ports/request-upload', {
         method: 'POST',
@@ -371,6 +371,47 @@ describe('TASK-PW-S3-WATERMARK-SYNC: Direct Checksum Verification & Ledger Sync'
 
       expect(res.status).toBe(400);
       expect(json.error).toContain('Evidentiary asset verification failed');
+    });
+
+    it('POST accepts complete-upload when object exists under staging key for prod imageUrl', async () => {
+      mockGetUser.mockResolvedValueOnce({
+        data: { user: { id: 'test-user-uuid' } },
+        error: null,
+      });
+
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: { node_id: 'test-node-101', status: 'pending', user_id: 'test-user-uuid' },
+        error: null,
+      });
+
+      // s3.send succeeds for stagingKey
+      mockSend.mockReset();
+      mockSend.mockResolvedValueOnce({});
+
+      const req = new Request('https://test/api/ports/request-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer valid-token',
+        },
+        body: JSON.stringify({
+          action: 'complete-upload',
+          nodeId: 'test-node-101',
+          imageUrl: 'https://ports-stag.patchwork.id/ports/prod/test-node-101.jpg',
+          imageHash: sampleHexSha256,
+        }),
+      });
+
+      const res = await POST(req);
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.success).toBe(true);
+      expect(mockSend).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Key: 'ports/test-node-101.jpg',
+        })
+      );
     });
   });
 });

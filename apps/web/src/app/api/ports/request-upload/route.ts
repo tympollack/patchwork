@@ -258,17 +258,29 @@ async function handleCompleteUpload(user: { id: string }, body: any) {
     objectKey = imageUrl.replace(/^\/+/, '');
   }
 
+  const stagingKey = objectKey.replace(/^ports\/prod\//, 'ports/');
+  const cleanNodeId = String(nodeId).replace(/[^a-zA-Z0-9_-]/g, '_');
+
   if (typeof s3.send === 'function') {
-    try {
-      await s3.send(
-        new HeadObjectCommand({
-          Bucket: R2_BUCKET_NAME,
-          Key: objectKey,
-        })
-      );
-    } catch {
+    let exists = false;
+    const candidateKeys = Array.from(new Set([stagingKey, objectKey, `ports/${cleanNodeId}.jpg`]));
+    for (const key of candidateKeys) {
+      try {
+        await s3.send(
+          new HeadObjectCommand({
+            Bucket: R2_BUCKET_NAME,
+            Key: key,
+          })
+        );
+        exists = true;
+        break;
+      } catch {
+        // try next key
+      }
+    }
+    if (!exists) {
       return Response.json(
-        { error: `Evidentiary asset verification failed: object '${objectKey}' not found in storage.` },
+        { error: `Evidentiary asset verification failed: object '${stagingKey}' not found in storage.` },
         { status: 400 }
       );
     }

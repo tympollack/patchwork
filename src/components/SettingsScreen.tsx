@@ -154,10 +154,32 @@ export default function SettingsScreen() {
 
       <Section title="NETWORK" />
 
-      <Row label="BACKEND URL" sub="Cloudflare Worker endpoint for uploads">
+      <Row
+        label="BACKEND URL"
+        sub={
+          settings.apiBase &&
+          !settings.apiBase.startsWith('https://') &&
+          (!__DEV__ ||
+            (!settings.apiBase.startsWith('http://localhost') &&
+              !settings.apiBase.startsWith('http://127.0.0.1') &&
+              !settings.apiBase.startsWith('http://10.0.2.2')))
+            ? '⚠️ HTTPS required for secure coordinate telemetry'
+            : 'Cloudflare Worker endpoint for uploads'
+        }
+      >
         <View style={styles.inputWrap}>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              settings.apiBase &&
+              !settings.apiBase.startsWith('https://') &&
+              (!__DEV__ ||
+                (!settings.apiBase.startsWith('http://localhost') &&
+                  !settings.apiBase.startsWith('http://127.0.0.1') &&
+                  !settings.apiBase.startsWith('http://10.0.2.2')))
+                ? { borderColor: '#FF5555' }
+                : null,
+            ]}
             value={settings.apiBase}
             placeholder="https://..."
             placeholderTextColor="#4A6572"

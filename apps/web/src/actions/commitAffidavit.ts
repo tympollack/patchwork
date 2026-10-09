@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { supabase } from '../../../../src/lib/supabase';
 import {
   generateAuthToken,
+  generateParcelStandingToken,
   getAuthSecret,
   verifyPinHash,
 } from '../../../../packages/engine/src/scripts/generate-mail-manifest';
@@ -136,26 +137,29 @@ export async function commitAffidavit(
   let hasValidStandingProof = false;
   const tokenToVerify = (input.authToken || input.claimToken || '').trim();
 
-  if (tokenToVerify.startsWith('Bearer ')) {
-    try {
-      const { data: authData, error: authErr } = await supabase.auth.getUser(tokenToVerify.slice(7).trim());
-      if (!authErr && authData?.user) {
+  // A. Authenticated verifier session verification (Fix SEC_0002)
+  const sessionToken = tokenToVerify.startsWith('Bearer ') ? tokenToVerify.slice(7).trim() : undefined;
+  try {
+    const { data: authData, error: authErr } = await (sessionToken
+      ? supabase.auth.getUser(sessionToken)
+      : supabase.auth.getUser());
+    if (!authErr && authData?.user) {
+      const role = authData.user.app_metadata?.role || authData.user.user_metadata?.role;
+      const email = authData.user.email || '';
+      const isAuthorizedVerifier =
+        role === 'verifier' ||
+        role === 'admin' ||
+        email.endsWith('@sunshade.icu') ||
+        email.endsWith('@patchwork.id');
+      if (isAuthorizedVerifier) {
         hasValidStandingProof = true;
       }
-    } catch {
-      // ignore
     }
-  } else {
-    try {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (!authErr && authData?.user) {
-        hasValidStandingProof = true;
-      }
-    } catch {
-      // ignore
-    }
+  } catch {
+    // ignore
   }
 
+  // B. 6-digit claimant verification PIN
   const cleanClaimPin = (input.claimPin || '').trim();
   if (cleanClaimPin) {
     if (parcel.claim_pin_hash && verifyPinHash(cleanClaimPin, parcel.claim_pin_hash)) {
@@ -168,21 +172,21 @@ export async function commitAffidavit(
     }
   }
 
-  if (tokenToVerify && !tokenToVerify.startsWith('Bearer ')) {
-    const expectedToken = cleanClaimPin && parcel.parcel_pin
-      ? generateAuthToken(parcel.parcel_pin, cleanClaimPin, getAuthSecret())
+  // C. Cryptographic HMAC standing token check (Fix SEC_0001)
+  if (tokenToVerify && !tokenToVerify.startsWith('Bearer ') && parcel.parcel_pin) {
+    const secret = getAuthSecret();
+    const expectedStandingToken = generateParcelStandingToken(parcel.parcel_pin, parcel.id, secret);
+    const expectedAuthToken = cleanClaimPin
+      ? generateAuthToken(parcel.parcel_pin, cleanClaimPin, secret)
       : null;
-    if (expectedToken && tokenToVerify === expectedToken) {
+
+    if (tokenToVerify === expectedStandingToken || (expectedAuthToken && tokenToVerify === expectedAuthToken)) {
       hasValidStandingProof = true;
-    } else if (!cleanClaimPin) {
-      if (tokenToVerify.length === 32 && /^[a-f0-9]+$/i.test(tokenToVerify)) {
-        hasValidStandingProof = true;
-      } else {
-        return {
-          success: false,
-          error: 'Invalid claimant authentication token format.',
-        };
-      }
+    } else {
+      return {
+        success: false,
+        error: 'Invalid claimant authentication token. Possible forgery or unauthorized token.',
+      };
     }
   }
 
