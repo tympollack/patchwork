@@ -6,17 +6,38 @@
     "entryPoint": "./index.js"
   },
   "dependencies": {
+    "@digitalcanopy/ui": "^0.1.2",
+    "@nozbe/watermelondb": "^0.28.0",
+    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-navigation/bottom-tabs": "^6.6.1",
+    "@react-navigation/native": "^6.1.9",
+    "@react-navigation/native-stack": "^6.9.17",
+    "@supabase/supabase-js": "^2.108.2",
     "expo": "~55.0.0",
-    "expo-camera": "~55.0.0",
+    "expo-camera": "~55.0.19",
+    "expo-clipboard": "~55.0.14",
+    "expo-file-system": "~55.0.23",
+    "expo-haptics": "~55.0.5",
     "expo-location": "~55.1.10",
-    "expo-status-bar": "~55.0.0",
+    "expo-sqlite": "~55.0.16",
+    "expo-status-bar": "~55.0.6",
+    "h3-js": "^4.5.0",
     "react": "19.2.0",
-    "react-native": "0.83.6"
+    "react-native": "0.83.6",
+    "react-native-maps": "1.7.1",
+    "react-native-safe-area-context": "5.8.0",
+    "react-native-screens": "4.25.2",
+    "react-native-svg": "15.15.5",
+    "react-native-webview": "^13.12.5",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1140.0",
+    "@aws-sdk/s3-request-presigner": "^3.1140.0",
     "@testing-library/react-native": "^12.9.0",
     "@types/jest": "~29.5.14",
     "@types/react": "~19.2.0",
+    "@types/react-dom": "~19.2.0",
     "jest": "~29.7.0",
     "jest-expo": "~55.0.0",
     "react-test-renderer": "19.2.0",
@@ -24,13 +45,26 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest"
+    "serve:web": "node scripts/serve-web.mjs",
+    "lint:filesize": "node scripts/lint-filesize.mjs",
+    "build": "tsc --noEmit",
+    "test": "jest",
+    "verify:r2": "node scripts/verify-r2-credentials.mjs",
+    "worker:test": "npm test --prefix workers/patchwork-upload-processor",
+    "worker:deploy": "npm run deploy --prefix workers/patchwork-upload-processor"
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/workers/"
+    ],
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
     ]
