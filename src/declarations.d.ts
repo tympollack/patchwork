@@ -4,3 +4,9 @@
   export const FontAwesome: any;
   export const Feather: any;
 }
+
+declare module 'react-test-renderer' {
+  const content: any;
+  export default content;
+  export const act: any;
+}
