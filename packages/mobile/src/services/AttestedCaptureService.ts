@@ -172,6 +172,78 @@ export class AttestedCaptureService {
   }
 
   /**
+   * Pure JS SHA-256 fallback for native / non-WebCrypto environments
+   */
+  public static fallbackSha256(bytes: Uint8Array): string {
+    // Try Node.js crypto if present in environment
+    try {
+      const nodeCrypto = typeof require !== 'undefined' ? require('crypto') : null;
+      if (nodeCrypto && typeof nodeCrypto.createHash === 'function') {
+        return nodeCrypto.createHash('sha256').update(bytes).digest('hex');
+      }
+    } catch {
+      // Fall through to algorithmic digest
+    }
+
+    // Standard SHA-256 constants
+    const K = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+
+    let H0 = 0x6a09e667, H1 = 0xbb67ae85, H2 = 0x3c6ef372, H3 = 0xa54ff53a;
+    let H4 = 0x510e527f, H5 = 0x9b05688c, H6 = 0x1f83d9ab, H7 = 0x5be0cd19;
+
+    const len = bytes.length;
+    const bitLen = len * 8;
+    const padLen = (len % 64 < 56) ? 64 - (len % 64) : 128 - (len % 64);
+    const padded = new Uint8Array(len + padLen);
+    padded.set(bytes);
+    padded[len] = 0x80;
+
+    const view = new DataView(padded.buffer);
+    view.setUint32(padded.length - 4, bitLen >>> 0, false);
+    view.setUint32(padded.length - 8, Math.floor(bitLen / 0x100000000), false);
+
+    const W = new Uint32Array(64);
+    for (let i = 0; i < padded.length; i += 64) {
+      for (let t = 0; t < 16; t++) {
+        W[t] = view.getUint32(i + t * 4, false);
+      }
+      for (let t = 16; t < 64; t++) {
+        const s0 = ((W[t - 15] >>> 7) | (W[t - 15] << 25)) ^ ((W[t - 15] >>> 18) | (W[t - 15] << 14)) ^ (W[t - 15] >>> 3);
+        const s1 = ((W[t - 2] >>> 17) | (W[t - 2] << 15)) ^ ((W[t - 2] >>> 19) | (W[t - 2] << 13)) ^ (W[t - 2] >>> 10);
+        W[t] = (W[t - 16] + s0 + W[t - 7] + s1) >>> 0;
+      }
+
+      let a = H0, b = H1, c = H2, d = H3, e = H4, f = H5, g = H6, h = H7;
+      for (let t = 0; t < 64; t++) {
+        const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+        const ch = (e & f) ^ (~e & g);
+        const temp1 = (h + S1 + ch + K[t] + W[t]) >>> 0;
+        const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const temp2 = (S0 + maj) >>> 0;
+
+        h = g; g = f; f = e; e = (d + temp1) >>> 0;
+        d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+      }
+
+      H0 = (H0 + a) >>> 0; H1 = (H1 + b) >>> 0; H2 = (H2 + c) >>> 0; H3 = (H3 + d) >>> 0;
+      H4 = (H4 + e) >>> 0; H5 = (H5 + f) >>> 0; H6 = (H6 + g) >>> 0; H7 = (H7 + h) >>> 0;
+    }
+
+    const hexParts = [H0, H1, H2, H3, H4, H5, H6, H7];
+    return hexParts.map((h) => h.toString(16).padStart(8, '0')).join('');
+  }
+
+  /**
    * Compute payload hash: SHA-256(image_bytes + lat + lng + timestamp)
    * and raw image SHA-256
    */
@@ -182,15 +254,13 @@ export class AttestedCaptureService {
     timestamp: number
   ): Promise<{ payloadHashHex: string; imageSha256Hex: string; combinedBuffer: Uint8Array }> {
     const subtle = this.getSubtleCrypto();
-    if (!subtle) {
-      throw new Error('WebCrypto subtle is required for cryptographic hashing.');
-    }
-
     const rawBytes = imageBytes instanceof Uint8Array ? imageBytes : new Uint8Array(imageBytes);
 
-    // Compute raw image SHA-256
-    const imgDigest = await subtle.digest('SHA-256', rawBytes.buffer as ArrayBuffer);
-    const imageSha256Hex = this.bufToHex(imgDigest);
+    // Extract exact slice bytes to prevent hashing unrelated buffer memory in subarray views
+    const exactBuffer = rawBytes.buffer.slice(
+      rawBytes.byteOffset,
+      rawBytes.byteOffset + rawBytes.byteLength
+    ) as ArrayBuffer;
 
     // Construct telemetry payload string
     const metaString = `\nlat=${lat.toFixed(6)}\nlng=${lng.toFixed(6)}\ntimestamp=${timestamp}`;
@@ -198,13 +268,24 @@ export class AttestedCaptureService {
     const metaBytes = enc.encode(metaString);
 
     // Concatenate imageBytes + lat + lng + timestamp bytes
-    const combinedBuffer = new Uint8Array(rawBytes.length + metaBytes.length);
-    combinedBuffer.set(rawBytes, 0);
-    combinedBuffer.set(metaBytes, rawBytes.length);
+    const combinedBuffer = new Uint8Array(rawBytes.byteLength + metaBytes.length);
+    combinedBuffer.set(new Uint8Array(exactBuffer), 0);
+    combinedBuffer.set(metaBytes, rawBytes.byteLength);
 
-    // Compute payload hash
-    const payloadDigest = await subtle.digest('SHA-256', combinedBuffer.buffer as ArrayBuffer);
-    const payloadHashHex = this.bufToHex(payloadDigest);
+    let imageSha256Hex: string;
+    let payloadHashHex: string;
+
+    if (subtle) {
+      const imgDigest = await subtle.digest('SHA-256', exactBuffer);
+      imageSha256Hex = this.bufToHex(imgDigest);
+
+      const payloadDigest = await subtle.digest('SHA-256', combinedBuffer.buffer as ArrayBuffer);
+      payloadHashHex = this.bufToHex(payloadDigest);
+    } else {
+      // Fallback for native runtimes where crypto.subtle is not configured
+      imageSha256Hex = this.fallbackSha256(new Uint8Array(exactBuffer));
+      payloadHashHex = this.fallbackSha256(combinedBuffer);
+    }
 
     return { payloadHashHex, imageSha256Hex, combinedBuffer };
   }
@@ -376,12 +457,17 @@ export class AttestedCaptureService {
         ? captureData.imageBytes
         : new Uint8Array(captureData.imageBytes);
 
+    const exactBuffer = rawBytes.buffer.slice(
+      rawBytes.byteOffset,
+      rawBytes.byteOffset + rawBytes.byteLength
+    ) as ArrayBuffer;
+
     // Support browser / react-native / node FormData
     if (typeof Blob !== 'undefined') {
-      const blob = new Blob([rawBytes.buffer as ArrayBuffer], { type: captureData.mimeType || 'image/jpeg' });
+      const blob = new Blob([exactBuffer], { type: captureData.mimeType || 'image/jpeg' });
       formData.append('file', blob, captureData.fileName || 'capture.jpg');
     } else {
-      formData.append('file', rawBytes as any, captureData.fileName || 'capture.jpg');
+      formData.append('file', new Uint8Array(exactBuffer) as any, captureData.fileName || 'capture.jpg');
     }
 
     formData.append('payload_hash', captureData.attestation.payloadHashHex);

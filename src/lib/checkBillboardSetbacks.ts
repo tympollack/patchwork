@@ -22,7 +22,7 @@ export async function checkBillboardSetbacks(
     throw new Error('nodeId is required to check billboard setbacks');
   }
 
-  const { data, error } = await supabase.rpc('check_billboard_setbacks', {
+  const { data, error } = await supabase.schema('patchwork').rpc('check_billboard_setbacks', {
     p_node_id: nodeId,
     p_buffer_meters: bufferMeters,
   });

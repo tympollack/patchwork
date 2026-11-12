@@ -18,8 +18,8 @@ export interface AdPortCameraProps {
 }
 
 export const AdPortCamera: React.FC<AdPortCameraProps> = ({
-  initialLat = 37.774929,
-  initialLng = -122.419416,
+  initialLat,
+  initialLng,
   onCapture,
   onError,
   className = '',
@@ -27,8 +27,9 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [lat, setLat] = useState<number>(initialLat);
-  const [lng, setLng] = useState<number>(initialLng);
+  const [lat, setLat] = useState<number | null>(initialLat ?? null);
+  const [lng, setLng] = useState<number | null>(initialLng ?? null);
+  const [hasGpsFix, setHasGpsFix] = useState<boolean>(initialLat != null && initialLng != null);
   const [ambientLux, setAmbientLux] = useState<number>(850);
   const [exposure, setExposure] = useState<ExposureValues>({
     iso: 100,
@@ -37,6 +38,7 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
   });
   const [hardwareEnclaveEnabled, setHardwareEnclaveEnabled] = useState(!forceUnverified);
   const [lastCapture, setLastCapture] = useState<AttestedCaptureData | null>(null);
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
 
   // Monitor device orientation & ambient sensor if available
   useEffect(() => {
@@ -63,14 +65,19 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
         (pos) => {
           setLat(pos.coords.latitude);
           setLng(pos.coords.longitude);
+          setHasGpsFix(true);
+          setWarningMessage(null);
         },
         () => {
-          // Use initial coordinates fallback
+          if (initialLat == null || initialLng == null) {
+            setHasGpsFix(false);
+            setWarningMessage('GPS location access denied or unavailable. Captures flagged as unverified.');
+          }
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
     }
-  }, []);
+  }, [initialLat, initialLng]);
 
   const liveLuminance = AttestedCaptureService.calculateLuminance(exposure, ambientLux);
 
@@ -78,12 +85,26 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check if gallery/file upload is stale (not a live camera sightline)
+    const isStaleFile = Boolean(file.lastModified && Math.abs(Date.now() - file.lastModified) > 120_000);
+    const effectiveLat = lat ?? 0;
+    const effectiveLng = lng ?? 0;
+    const shouldAttest = hardwareEnclaveEnabled && !forceUnverified && !isStaleFile && hasGpsFix;
+
+    if (isStaleFile) {
+      setWarningMessage('Historical / gallery photo detected. Enclave attestation requires live capture.');
+    } else if (!hasGpsFix) {
+      setWarningMessage('No verified GPS fix. Geotagging accuracy cannot be attested.');
+    } else {
+      setWarningMessage(null);
+    }
+
     setIsProcessing(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
       const metadata: CaptureMetadata = {
-        lat,
-        lng,
+        lat: effectiveLat,
+        lng: effectiveLng,
         timestamp: Date.now(),
         ambientLux,
         exposure,
@@ -95,7 +116,7 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
         {
           fileName: file.name,
           mimeType: file.type || 'image/jpeg',
-          forceUnverified: !hardwareEnclaveEnabled,
+          forceUnverified: !shouldAttest,
         }
       );
 
@@ -170,8 +191,16 @@ export const AdPortCamera: React.FC<AdPortCameraProps> = ({
             Sightline capture embeds cryptographic enclave signature & ambient lux telemetry.
           </p>
           <div className="font-mono text-xs text-[#00FFFF]">
-            GPS: {lat.toFixed(6)}, {lng.toFixed(6)}
+            GPS: {lat != null && lng != null ? `${lat.toFixed(6)}, ${lng.toFixed(6)}` : 'ACQUIRING GPS FIX...'}
           </div>
+          {warningMessage && (
+            <div
+              data-testid="camera-warning-banner"
+              className="text-amber-400 font-mono text-[10px] mt-1.5 bg-amber-950/50 border border-amber-500/40 px-2.5 py-1 rounded inline-block"
+            >
+              ⚠️ {warningMessage}
+            </div>
+          )}
         </div>
 
         {/* Hidden native input */}

@@ -1,15 +1,21 @@
 import { checkBillboardSetbacks } from '../src/lib/checkBillboardSetbacks';
 import { supabase } from '../src/lib/supabase';
 
+const mockRpc = jest.fn();
+
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
-    rpc: jest.fn(),
+    schema: jest.fn().mockImplementation((schemaName: string) => ({
+      rpc: mockRpc,
+    })),
+    rpc: mockRpc,
   },
 }));
 
 describe('TASK-PW-POSTGIS-BUFFERS: PostGIS Spatial Buffer RPC for Billboard Setbacks', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRpc.mockReset();
   });
 
   it('throws an error if nodeId is empty or missing', async () => {
@@ -25,14 +31,14 @@ describe('TASK-PW-POSTGIS-BUFFERS: PostGIS Spatial Buffer RPC for Billboard Setb
       deed_address: '1004 Commercial Blvd',
     };
 
-    (supabase.rpc as jest.Mock).mockResolvedValueOnce({
+    mockRpc.mockResolvedValueOnce({
       data: mockRpcResponse,
       error: null,
     });
 
     const result = await checkBillboardSetbacks('test-node-uuid');
 
-    expect(supabase.rpc).toHaveBeenCalledWith('check_billboard_setbacks', {
+    expect(mockRpc).toHaveBeenCalledWith('check_billboard_setbacks', {
       p_node_id: 'test-node-uuid',
       p_buffer_meters: 305,
     });
@@ -51,7 +57,7 @@ describe('TASK-PW-POSTGIS-BUFFERS: PostGIS Spatial Buffer RPC for Billboard Setb
       deed_address: '400 Industrial Way',
     };
 
-    (supabase.rpc as jest.Mock).mockResolvedValueOnce({
+    mockRpc.mockResolvedValueOnce({
       data: mockRpcResponse,
       error: null,
     });
@@ -63,7 +69,7 @@ describe('TASK-PW-POSTGIS-BUFFERS: PostGIS Spatial Buffer RPC for Billboard Setb
   });
 
   it('handles custom buffer meters override', async () => {
-    (supabase.rpc as jest.Mock).mockResolvedValueOnce({
+    mockRpc.mockResolvedValueOnce({
       data: {
         inside_school_buffer: false,
         nearest_school_dist_m: 600,
@@ -75,14 +81,14 @@ describe('TASK-PW-POSTGIS-BUFFERS: PostGIS Spatial Buffer RPC for Billboard Setb
 
     await checkBillboardSetbacks('test-node-uuid-3', 500);
 
-    expect(supabase.rpc).toHaveBeenCalledWith('check_billboard_setbacks', {
+    expect(mockRpc).toHaveBeenCalledWith('check_billboard_setbacks', {
       p_node_id: 'test-node-uuid-3',
       p_buffer_meters: 500,
     });
   });
 
   it('throws when supabase rpc reports an error', async () => {
-    (supabase.rpc as jest.Mock).mockResolvedValueOnce({
+    mockRpc.mockResolvedValueOnce({
       data: null,
       error: { message: 'Database connection failed' },
     });
