@@ -21,11 +21,12 @@ export default async function PublicAdCatalogPage(props: CatalogAdsPageProps) {
   const statusFilter = resolvedParams.status || 'ALL';
   const bufferOnly = resolvedParams.buffer_only === 'true';
 
-  // Query verified & reported nodes from patchwork schema
+  // Query strictly verified nodes from patchwork schema (unverified/pending evidence is gated)
   let query = supabase
     .schema('patchwork')
     .from('nodes')
-    .select('node_id, latitude, longitude, image_key, sha256_hash, h3_index, status, created_at, updated_at')
+    .select('node_id, latitude, longitude, image_key, sha256_hash, h3_index, status, luminance_lux, metadata, created_at, updated_at')
+    .eq('status', 'verified')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -35,36 +36,47 @@ export default async function PublicAdCatalogPage(props: CatalogAdsPageProps) {
 
   const { data: nodes, error } = await query;
 
-  // Map database nodes to public corridor audit cards
-  const items: CorridorAuditItem[] = (nodes || []).map((node: any, idx: number) => {
-    // Derive community stance deterministically
-    let stance: 'Deliberating' | 'Decree Served' | 'Remediated' = 'Deliberating';
-    if (node.status === 'verified') {
-      stance = idx % 2 === 0 ? 'Remediated' : 'Decree Served';
-    }
+  // Map database nodes to public corridor audit cards using persisted records
+  const items: CorridorAuditItem[] = (nodes || []).map((node: any) => {
+    const meta = node.metadata || {};
 
-    const isBreach = Boolean(node.latitude && Math.abs(node.latitude * 1000) % 2 === 0);
+    // Derive community stance strictly from persisted records
+    const stance: 'Deliberating' | 'Decree Served' | 'Remediated' =
+      meta.community_stance ||
+      (meta.remediated_at ? 'Remediated' : meta.decree_served_at ? 'Decree Served' : 'Deliberating');
+
+    const isInsideBuffer = meta.inside_school_buffer != null
+      ? Boolean(meta.inside_school_buffer)
+      : false;
+
+    const schoolDistM = meta.nearest_school_dist_m != null
+      ? Number(meta.nearest_school_dist_m)
+      : null;
+
+    const photoUrl = node.image_key
+      ? `https://ports.patchwork.live/${node.image_key}`
+      : (meta.photo_url || '');
+
+    const remediatedPhotoUrl = meta.remediated_image_key
+      ? `https://ports.patchwork.live/${meta.remediated_image_key}`
+      : meta.remediated_photo_url || undefined;
 
     return {
       id: node.node_id,
       h3Res8: node.h3_index || '8828308281fffff',
-      parcelId: `PIN-${node.node_id.substring(0, 8).toUpperCase()}`,
+      parcelId: meta.parcel_id ? `PIN-${meta.parcel_id}` : `PIN-${node.node_id.substring(0, 8).toUpperCase()}`,
       latitude: node.latitude,
       longitude: node.longitude,
       timestamp: node.created_at,
-      photoUrl: node.image_key
-        ? `https://ports.patchwork.live/${node.image_key}`
-        : 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=640&q=80',
-      remediatedPhotoUrl:
-        stance === 'Remediated'
-          ? 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&w=640&q=80'
-          : undefined,
-      insideSchoolBuffer: isBreach,
-      nearestSchoolDistM: isBreach ? 180 : 450,
-      luminanceNits: 450,
+      photoUrl,
+      remediatedPhotoUrl: stance === 'Remediated' ? remediatedPhotoUrl : undefined,
+      insideSchoolBuffer: isInsideBuffer,
+      nearestSchoolDistM: schoolDistM,
+      luminanceNits: meta.luminance_nits ?? (node.luminance_lux ? Math.round(node.luminance_lux / 3.14159) : undefined),
       communityStance: stance,
-      decreeServedAt: stance !== 'Deliberating' ? node.created_at : null,
-      remediatedAt: stance === 'Remediated' ? node.updated_at : null,
+      decreeServedAt: meta.decree_served_at ?? null,
+      remediatedAt: stance === 'Remediated' ? (meta.remediated_at ?? node.updated_at) : null,
+      ocrText: meta.ocr_raw_text || undefined,
     };
   });
 

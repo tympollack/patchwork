@@ -38,11 +38,18 @@ export interface DispatchResult {
   error?: string;
 }
 
-// In-memory idempotency deduplication cache
-const dispatchedNodesCache = new Set<string>();
+export interface DestinationDeliveryStatus {
+  tracker: boolean;
+  valerie: boolean;
+  trackerStatus?: number;
+  valerieStatus?: number;
+}
+
+// In-memory per-destination idempotency cache
+const dispatchedNodesState = new Map<string, DestinationDeliveryStatus>();
 
 export function resetDispatcherCache(): void {
-  dispatchedNodesCache.clear();
+  dispatchedNodesState.clear();
 }
 
 /**
@@ -99,7 +106,7 @@ export async function dispatchAdThresholdWebhook(
   const {
     trackerUrl = process.env.TRACKER_WEBHOOK_URL || 'https://track.sunshade.icu/api/v1/items/ingest',
     valerieUrl = process.env.VALERIE_WEBHOOK_URL || 'https://valerie.sunshade.icu/api/v1/proposals/ingest',
-    sharedHmacSecret = process.env.SUNSHADE_HMAC_SECRET || 'dev_secret_sunshade_bridge_2026',
+    sharedHmacSecret = process.env.SUNSHADE_HMAC_SECRET,
     maxRetries = 3,
     initialBackoffMs = 50,
     fetchFn = fetch,
@@ -119,12 +126,25 @@ export async function dispatchAdThresholdWebhook(
     };
   }
 
-  // 2. Idempotency guard: reject duplicate deliveries
-  if (dispatchedNodesCache.has(node.node_id)) {
+  // 2. Enforce HMAC secret requirement to prevent unauthenticated/forged webhook dispatches
+  if (!sharedHmacSecret) {
+    return {
+      nodeId: node.node_id,
+      trackerSuccess: false,
+      valerieSuccess: false,
+      error: 'SUNSHADE_HMAC_SECRET environment variable or config.sharedHmacSecret is required for webhook signing',
+    };
+  }
+
+  // 2. Idempotency guard: if both destinations already succeeded, skip duplicate delivery
+  const cached = dispatchedNodesState.get(node.node_id);
+  if (cached && cached.tracker && cached.valerie) {
     return {
       nodeId: node.node_id,
       trackerSuccess: true,
       valerieSuccess: true,
+      trackerStatus: cached.trackerStatus,
+      valerieStatus: cached.valerieStatus,
       skippedDuplicate: true,
     };
   }
@@ -179,57 +199,66 @@ export async function dispatchAdThresholdWebhook(
   const valerieSignature = signHmacPayload(valerieBodyStr, sharedHmacSecret);
 
   // 5. Execute HTTP requests with HMAC signatures and exponential retry
-  let trackerSuccess = false;
-  let valerieSuccess = false;
-  let trackerStatus: number | undefined;
-  let valerieStatus: number | undefined;
+  // Only invoke destinations that haven't succeeded yet
+  let trackerSuccess = cached?.tracker || false;
+  let trackerStatus = cached?.trackerStatus;
 
-  try {
-    const trackerRes = await fetchWithBackoff(
-      trackerUrl,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-SunShade-Signature': trackerSignature,
+  if (!trackerSuccess) {
+    try {
+      const trackerRes = await fetchWithBackoff(
+        trackerUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-SunShade-Signature': trackerSignature,
+          },
+          body: trackerBodyStr,
         },
-        body: trackerBodyStr,
-      },
-      maxRetries,
-      initialBackoffMs,
-      fetchFn
-    );
-    trackerStatus = trackerRes.status;
-    trackerSuccess = trackerRes.ok;
-  } catch (err: any) {
-    trackerSuccess = false;
+        maxRetries,
+        initialBackoffMs,
+        fetchFn
+      );
+      trackerStatus = trackerRes.status;
+      trackerSuccess = trackerRes.ok;
+    } catch (err: any) {
+      trackerSuccess = false;
+    }
   }
 
-  try {
-    const valerieRes = await fetchWithBackoff(
-      valerieUrl,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-SunShade-Signature': valerieSignature,
+  let valerieSuccess = cached?.valerie || false;
+  let valerieStatus = cached?.valerieStatus;
+
+  if (!valerieSuccess) {
+    try {
+      const valerieRes = await fetchWithBackoff(
+        valerieUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-SunShade-Signature': valerieSignature,
+          },
+          body: valerieBodyStr,
         },
-        body: valerieBodyStr,
-      },
-      maxRetries,
-      initialBackoffMs,
-      fetchFn
-    );
-    valerieStatus = valerieRes.status;
-    valerieSuccess = valerieRes.ok;
-  } catch (err: any) {
-    valerieSuccess = false;
+        maxRetries,
+        initialBackoffMs,
+        fetchFn
+      );
+      valerieStatus = valerieRes.status;
+      valerieSuccess = valerieRes.ok;
+    } catch (err: any) {
+      valerieSuccess = false;
+    }
   }
 
-  // Mark as dispatched in idempotency cache
-  if (trackerSuccess || valerieSuccess) {
-    dispatchedNodesCache.add(node.node_id);
-  }
+  // Update per-destination idempotency state
+  dispatchedNodesState.set(node.node_id, {
+    tracker: trackerSuccess,
+    valerie: valerieSuccess,
+    trackerStatus,
+    valerieStatus,
+  });
 
   return {
     nodeId: node.node_id,

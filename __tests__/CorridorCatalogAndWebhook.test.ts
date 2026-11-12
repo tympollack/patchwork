@@ -122,4 +122,65 @@ describe('TASK-PW-TRACKER-BRIDGE: Webhook Dispatcher to Tracker and Valerie', ()
     expect(dupRes.skippedDuplicate).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2); // Only called during first dispatch
   });
+
+  it('rejects dispatch if HMAC secret is missing to prevent forgery', async () => {
+    const oldEnv = process.env.SUNSHADE_HMAC_SECRET;
+    delete process.env.SUNSHADE_HMAC_SECRET;
+
+    const res = await dispatchAdThresholdWebhook(dummyNode, {
+      sharedHmacSecret: undefined,
+    });
+
+    expect(res.trackerSuccess).toBe(false);
+    expect(res.valerieSuccess).toBe(false);
+    expect(res.error).toContain('SUNSHADE_HMAC_SECRET environment variable or config.sharedHmacSecret is required');
+
+    process.env.SUNSHADE_HMAC_SECRET = oldEnv;
+  });
+
+  it('retries only the failed destination on subsequent attempts', async () => {
+    let trackerCalls = 0;
+    let valerieCalls = 0;
+
+    const mockFetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes('track.sunshade.icu')) {
+        trackerCalls++;
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
+      }
+      if (url.includes('valerie.sunshade.icu')) {
+        valerieCalls++;
+        if (valerieCalls === 1) {
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'temporary error' }) });
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
+      }
+      return Promise.reject(new Error('Unknown url'));
+    });
+
+    // First attempt: Tracker succeeds, Valerie fails
+    const firstRes = await dispatchAdThresholdWebhook(dummyNode, {
+      sharedHmacSecret: dummySecret,
+      maxRetries: 1,
+      initialBackoffMs: 1,
+      fetchFn: mockFetch as any,
+    });
+
+    expect(firstRes.trackerSuccess).toBe(true);
+    expect(firstRes.valerieSuccess).toBe(false);
+    expect(trackerCalls).toBe(1);
+    expect(valerieCalls).toBe(1);
+
+    // Second attempt: Tracker is skipped because it already succeeded; Valerie is retried and succeeds
+    const secondRes = await dispatchAdThresholdWebhook(dummyNode, {
+      sharedHmacSecret: dummySecret,
+      maxRetries: 1,
+      initialBackoffMs: 1,
+      fetchFn: mockFetch as any,
+    });
+
+    expect(secondRes.trackerSuccess).toBe(true);
+    expect(secondRes.valerieSuccess).toBe(true);
+    expect(trackerCalls).toBe(1); // Tracker was not re-called
+    expect(valerieCalls).toBe(2); // Valerie was retried
+  });
 });

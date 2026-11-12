@@ -67,6 +67,21 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
+  // 1. Authenticate caller (require service role or internal dispatch key)
+  const authHeader = req.headers.get("authorization") || "";
+  const internalKey = req.headers.get("x-sunshade-internal-key") || "";
+  const expectedSecret = Deno.env.get("INTERNAL_DISPATCH_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (expectedSecret && !authHeader.includes(expectedSecret) && internalKey !== expectedSecret) {
+    return jsonResponse({ error: "Unauthorized dispatch invocation" }, 401);
+  }
+
+  // 2. Validate HMAC signing secret
+  const hmacSecret = Deno.env.get("SUNSHADE_HMAC_SECRET");
+  if (!hmacSecret) {
+    return jsonResponse({ error: "SUNSHADE_HMAC_SECRET is required but not configured" }, 500);
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const { node_id, h3_index_res8, parcel_id, latitude, longitude, unique_ports, inside_school_buffer, ocr_raw_text } = body;
@@ -85,7 +100,6 @@ Deno.serve(async (req: Request) => {
 
     const trackerUrl = Deno.env.get("TRACKER_WEBHOOK_URL") || "https://track.sunshade.icu/api/v1/items/ingest";
     const valerieUrl = Deno.env.get("VALERIE_WEBHOOK_URL") || "https://valerie.sunshade.icu/api/v1/proposals/ingest";
-    const hmacSecret = Deno.env.get("SUNSHADE_HMAC_SECRET") || "dev_secret_sunshade_bridge_2026";
 
     // Format Tracker Payload
     const trackerPayload = {
@@ -133,32 +147,55 @@ Deno.serve(async (req: Request) => {
     const valerieBodyStr = JSON.stringify(valeriePayload);
     const valerieSig = await computeHmacSha256(valerieBodyStr, hmacSecret);
 
-    // Send to Tracker
-    const trackerResp = await fetchWithExponentialBackoff(trackerUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-SunShade-Signature": trackerSig,
-      },
-      body: trackerBodyStr,
-    });
+    // Isolate outbound dispatches so one destination failure never halts the other
+    let trackerResp: Response | null = null;
+    let trackerErr: string | null = null;
+    try {
+      trackerResp = await fetchWithExponentialBackoff(trackerUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SunShade-Signature": trackerSig,
+        },
+        body: trackerBodyStr,
+      });
+    } catch (err: any) {
+      trackerErr = err.message || "Tracker delivery failed";
+    }
 
-    // Send to Valerie
-    const valerieResp = await fetchWithExponentialBackoff(valerieUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-SunShade-Signature": valerieSig,
-      },
-      body: valerieBodyStr,
-    });
+    let valerieResp: Response | null = null;
+    let valerieErr: string | null = null;
+    try {
+      valerieResp = await fetchWithExponentialBackoff(valerieUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-SunShade-Signature": valerieSig,
+        },
+        body: valerieBodyStr,
+      });
+    } catch (err: any) {
+      valerieErr = err.message || "Valerie delivery failed";
+    }
+
+    const trackerSuccess = Boolean(trackerResp && trackerResp.ok);
+    const valerieSuccess = Boolean(valerieResp && valerieResp.ok);
+    const allSuccess = trackerSuccess && valerieSuccess;
 
     return jsonResponse({
-      success: true,
+      success: allSuccess,
       node_id,
-      tracker_status: trackerResp.status,
-      valerie_status: valerieResp.status,
-    }, 200);
+      tracker: {
+        success: trackerSuccess,
+        status: trackerResp?.status || null,
+        error: trackerErr || (!trackerSuccess ? `HTTP ${trackerResp?.status}` : null),
+      },
+      valerie: {
+        success: valerieSuccess,
+        status: valerieResp?.status || null,
+        error: valerieErr || (!valerieSuccess ? `HTTP ${valerieResp?.status}` : null),
+      },
+    }, allSuccess ? 200 : 207);
   } catch (err: any) {
     return jsonResponse({ error: err.message || "Dispatcher internal error" }, 500);
   }
